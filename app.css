@@ -1,0 +1,181 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+body { font: 15px/1.45 system-ui, sans-serif; color: #e8e8ec; background: #101420; }
+
+#map { position: fixed; inset: 0; width: 100%; height: 100%; display: block; background: #101420; }
+/* #overlay draws the static district-boundary outline (Task 6) in a plain 2D
+   canvas above #map, never intercepting input — mirrors #map's positioning
+   exactly (same stacking context) minus the background (transparent so #map
+   shows through). */
+#overlay { position: fixed; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none; }
+
+/* ---------- bottom control bar ---------- */
+#chrome { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; padding: 10px 16px 14px;
+  background: linear-gradient(#10142000, #101420dd 30%, #101420 100%);
+  display: flex; flex-direction: column; gap: 8px; }
+
+#city-picker { display: flex; gap: 6px; flex-wrap: wrap; }
+#aoi-picker { display: flex; gap: 6px; flex-wrap: wrap; }
+#city-picker button, #aoi-picker button, #speed-presets button, #play-pause, #transport button {
+  padding: 6px 14px; border: 1px solid #2a313d; background: rgba(16,20,32,.82); color: #c7ccd6;
+  border-radius: 999px; cursor: pointer; font: inherit; font-size: 13px; transition: all .15s;
+}
+#city-picker button.active, #aoi-picker button.active, #speed-presets button.active {
+  background: #6fd3e6; color: #061014; border-color: #6fd3e6; font-weight: 600;
+}
+#speed-presets { display: flex; gap: 6px; }
+#transport { display: inline-flex; gap: 6px; align-items: center; }
+#play-pause { min-width: 40px; text-align: center; }
+#clock { font-variant-numeric: tabular-nums; font-size: 15px; color: #fff; }
+/* 1x whisper: a quiet "next ripple · 12s" line under the clock (spec §4) */
+#whisper { font-size: 12px; color: #7d8494; min-height: 1.2em; font-variant-numeric: tabular-nums; }
+
+#scrubber { width: 100%; accent-color: #6fd3e6; }
+
+#status { font: 11px monospace; color: #5b6270; }
+
+/* Quiet, always-visible re-entry into the guided tour (Task 4 v2.1): a
+   small circular chip, easy to ignore, easy to find. */
+#help-btn {
+  position: fixed; right: 14px; bottom: 14px; z-index: 7;
+  width: 28px; height: 28px; padding: 0; border-radius: 50%;
+  border: 1px solid #2a313d; background: rgba(16,20,32,.7); color: #c7ccd6;
+  font: 13px/1 system-ui, sans-serif; font-weight: 600; cursor: pointer;
+  opacity: .55; transition: opacity .15s, background .15s;
+}
+#help-btn:hover, #help-btn:focus-visible { opacity: 1; background: rgba(16,20,32,.92); }
+#help-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+/* Credits opener — same chip language as #help-btn, parked just to its left.
+   (This slot previously held #posters-link, which pointed at a posters.html
+   that does not exist in this project; it would have 404'd once published.) */
+#credits-btn {
+  position: fixed; right: 50px; bottom: 14px; z-index: 7;
+  width: 28px; height: 28px; padding: 0; border-radius: 50%;
+  border: 1px solid #2a313d; background: rgba(16,20,32,.7); color: #c7ccd6;
+  font: 13px/1 system-ui, sans-serif; font-weight: 600; text-align: center;
+  cursor: pointer; opacity: .55; transition: opacity .15s, background .15s;
+}
+#credits-btn:hover, #credits-btn:focus-visible { opacity: 1; background: rgba(16,20,32,.92); }
+#credits-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+/* ---------- intro overlay + click-stepper ----------
+   Bremer/Visual Cinnamon pattern: quiet, semi-transparent dark panels,
+   generous whitespace, one idea per screen, click-to-advance only. */
+#intro, #stepper, #credits {
+  position: fixed; inset: 0; z-index: 10; display: flex; align-items: center;
+  justify-content: center; padding: 24px;
+  background: radial-gradient(ellipse at center, #10142000 0%, #060810b3 75%);
+}
+/* Above #intro's z-index so credits stay reachable from the intro card too. */
+#credits { z-index: 11; }
+/* The [hidden] UA-stylesheet rule (display:none, specificity 0,0,1,0 via
+   attribute selector) loses to the ID selector above (specificity 0,1,0,0),
+   so setting the `hidden` IDL property alone never visually hides these
+   overlays. Force it explicitly, higher-specificity than the base rule. */
+#intro[hidden], #stepper[hidden], #chrome[hidden], #credits[hidden] { display: none !important; }
+#stepper { align-items: flex-end; justify-content: center; padding-bottom: 96px; background: none; pointer-events: none; }
+#intro-card, #stepper-card, #credits-card {
+  background: rgba(14, 18, 30, 0.86); border: 1px solid #2a313d; border-radius: 14px;
+  padding: 28px 32px; max-width: 480px; width: 100%;
+  box-shadow: 0 12px 40px rgba(0,0,0,.45);
+  backdrop-filter: blur(6px);
+}
+/* ---------- credits / attribution dialog ----------
+   Same panel language as the intro card. Kept scrollable because the three
+   attributions plus the disclaimer can exceed a short viewport. */
+#credits-card { max-height: 80vh; overflow-y: auto; }
+#credits-title { margin: 0 0 16px; font-size: 18px; font-weight: 600; color: #fff; }
+#credits-card dl { margin: 0 0 16px; }
+#credits-card dt {
+  color: #7d8494; font-size: 11px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .08em; margin-top: 14px;
+}
+#credits-card dt:first-child { margin-top: 0; }
+#credits-card dd { margin: 4px 0 0; color: #c7ccd6; font-size: 13px; line-height: 1.5; }
+#credits-card a { color: #6fd3e6; text-decoration: none; border-bottom: 1px solid #6fd3e644; }
+#credits-card a:hover { border-bottom-color: #6fd3e6; }
+#credits-card .disclaimer {
+  margin: 0 0 18px; padding-top: 14px; border-top: 1px solid #2a313d;
+  color: #7d8494; font-size: 12px; line-height: 1.5;
+}
+#credits-close {
+  padding: 8px 20px; border: 1px solid #2a313d; background: transparent; color: #c7ccd6;
+  border-radius: 999px; cursor: pointer; font: inherit; font-size: 13px; transition: all .15s;
+}
+#credits-close:hover { background: rgba(255,255,255,.06); color: #fff; }
+#credits-close:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+#stepper-card { pointer-events: auto; max-width: 420px; text-align: center; }
+#intro-title { margin: 0 0 12px; font-size: 22px; font-weight: 600; color: #fff; letter-spacing: .01em; }
+#intro-card p, #step-caption { margin: 0 0 18px; color: #c7ccd6; font-size: 15px; line-height: 1.5; }
+#step-caption { margin-bottom: 16px; min-height: 3em; }
+/* Per-city coverage line on the intro card (NOT a permanent chrome row —
+   #chrome already stacks seven elements). Selector is #intro-card-qualified so
+   it outranks the `#intro-card p` margin rule above; :empty hides it entirely
+   when a city has no coverage_note, so no stray gap appears. */
+#intro-card #coverage-note { font-size: 12px; color: #7d8494; margin: 8px 0 0; }
+#intro-card #coverage-note:empty { display: none; }
+
+#intro-begin, #step-next, #step-explore {
+  padding: 9px 22px; border: 1px solid #6fd3e6; background: #6fd3e6; color: #061014;
+  border-radius: 999px; cursor: pointer; font: inherit; font-size: 14px; font-weight: 600;
+  transition: all .15s;
+}
+#intro-begin:hover, #step-next:hover, #step-explore:hover { background: #8fe0f0; }
+#intro-begin:focus-visible, #step-next:focus-visible, #step-explore:focus-visible,
+#play-pause:focus-visible, #aoi-picker button:focus-visible,
+#speed-presets button:focus-visible, #transport button:focus-visible {
+  outline: 2px solid #fff; outline-offset: 2px;
+}
+
+#stepper-counter { font: 12px/1 monospace; letter-spacing: .08em; text-transform: uppercase;
+  color: #6fd3e6; margin-bottom: 10px; }
+#stepper-actions { display: flex; gap: 10px; justify-content: center; }
+#step-explore { background: transparent; color: #6fd3e6; }
+#step-explore:hover { background: rgba(111,211,230,.12); }
+
+/* ---------- v2.2 right-side district panel ---------- */
+#district-panel { position: fixed; top: 0; right: 0; bottom: 0; z-index: 6;
+  display: flex; align-items: center; pointer-events: none; }
+#district-panel[hidden] { display: none !important; }
+#dp-tab { pointer-events: auto; writing-mode: vertical-rl; padding: 14px 6px;
+  border: 1px solid #2a313d; border-right: none; border-radius: 10px 0 0 10px;
+  background: rgba(16,20,32,.82); color: #c7ccd6; cursor: pointer;
+  font: 12px/1 system-ui, sans-serif; letter-spacing: .12em; text-transform: uppercase;
+  opacity: .6; transition: opacity .15s; }
+#dp-tab:hover, #district-panel.open #dp-tab { opacity: 1; }
+#dp-body { pointer-events: auto; width: 260px; max-height: 78vh; overflow-y: auto;
+  background: rgba(14,18,30,.9); border: 1px solid #2a313d; border-right: none;
+  border-radius: 12px 0 0 12px; padding: 10px 8px; backdrop-filter: blur(6px); }
+#dp-body[hidden] { display: none; }
+.dp-city { font: 11px/1 monospace; letter-spacing: .1em; text-transform: uppercase;
+  color: #6fd3e6; margin: 10px 6px 4px; }
+.dp-city:first-child { margin-top: 2px; }
+#dp-list button { display: block; width: 100%; text-align: left; padding: 5px 10px;
+  border: none; border-radius: 7px; background: transparent; color: #c7ccd6;
+  cursor: pointer; font: inherit; font-size: 13px; }
+#dp-list button.dp-child { padding-left: 24px; font-size: 12px; color: #9aa1ad; }
+#dp-list button:hover { background: rgba(111,211,230,.10); color: #fff; }
+#dp-list button.active { background: rgba(111,211,230,.18); color: #6fd3e6; }
+#dp-list button:focus-visible { outline: 2px solid #fff; outline-offset: -2px; }
+
+@media (max-width: 640px) {
+  /* bottom sheet: tab sits above the chrome bar; body slides up full-width */
+  #district-panel { top: auto; right: 0; left: 0; bottom: 0; align-items: flex-end;
+    flex-direction: column; z-index: 8; }
+  #dp-tab { writing-mode: horizontal-tb; align-self: flex-end;
+    margin: 0 14px 148px 0; border-right: 1px solid #2a313d; border-radius: 10px; }
+  #dp-body { width: 100%; max-height: 46vh; border-radius: 12px 12px 0 0;
+    border-right: 1px solid #2a313d; }
+}
+
+/* ---------- MOBILE ---------- */
+@media (max-width: 640px) {
+  #chrome { padding: 8px 10px 12px; }
+  #aoi-picker { justify-content: center; }
+  #aoi-picker button, #speed-presets button, #play-pause, #transport button { padding: 5px 10px; font-size: 12px; }
+  #clock { text-align: center; }
+  #intro-card, #stepper-card { padding: 20px 20px; }
+  #intro-title { font-size: 19px; }
+  #stepper { padding-bottom: 140px; }
+}

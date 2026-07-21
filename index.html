@@ -1,0 +1,79 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cities, breathing in light</title><link rel="stylesheet" href="app.css"></head>
+<body>
+<canvas id="map"></canvas>
+<canvas id="overlay"></canvas>
+<div id="district-panel" hidden></div>
+
+<div id="intro" role="dialog" aria-modal="true" aria-labelledby="intro-title">
+  <div id="intro-card">
+    <h1 id="intro-title">Cities, breathing in light</h1>
+    <p>Every time a bus, tram, or train reaches a stop, a ripple of light spreads out
+       along the streets a rider could walk in three minutes. Where ripples overlap,
+       the city's pulse brightens.</p>
+    <p id="coverage-note" class="coverage"></p>
+    <button id="intro-begin" type="button">Explore</button>
+  </div>
+</div>
+
+<div id="stepper" hidden>
+  <div id="stepper-card">
+    <div id="stepper-counter" aria-live="polite">Step <span id="step-num">1</span> / 3</div>
+    <p id="step-caption" aria-live="polite" aria-atomic="true"></p>
+    <div id="stepper-actions">
+      <button id="step-next" type="button">Next</button>
+      <button id="step-explore" type="button" hidden>Explore</button>
+    </div>
+  </div>
+</div>
+
+<div id="chrome" hidden>
+  <div id="clock">–</div>
+  <div id="whisper"></div>
+  <input id="scrubber" type="range" min="0" max="1" step="0.0001" value="0">
+  <div id="speed-presets"><button data-speed="1">1×</button><button data-speed="30">30×</button><button data-speed="60" class="active">60×</button><button data-speed="300">300×</button></div>
+  <div id="transport">
+    <button id="skip-back" type="button" title="Back 15 min" aria-label="Back 15 minutes">−15m</button>
+    <button id="play-pause" aria-pressed="false" title="Pause (Space)" aria-label="Pause">⏸</button>
+    <button id="skip-fwd" type="button" title="Forward 15 min" aria-label="Forward 15 minutes">+15m</button>
+  </div>
+  <div id="city-picker" hidden></div>
+  <!-- Populated from the ACTIVE city's subareas (cities.json) by app.js. Left
+       empty on purpose: hardcoded chips here would be Helsinki-only again. -->
+  <div id="aoi-picker"></div>
+  <div id="status"></div>
+  <button id="help-btn" type="button" title="How to read this" aria-label="How to read this">?</button>
+  <button id="credits-btn" type="button" title="Data sources &amp; credits" aria-label="Data sources and credits">&#169;</button>
+</div>
+
+<!-- Attribution is a LICENCE OBLIGATION, not decoration: HSL's data is CC BY 4.0
+     and the OSM-derived street geometry is ODbL, both of which REQUIRE credit on
+     a published work. The Dutch feed permits free use but forbids implying we
+     represent a transit agency — hence the explicit disclaimer. See
+     docs/licensing.md for the verbatim terms. -->
+<div id="credits" role="dialog" aria-modal="true" aria-labelledby="credits-title" hidden>
+  <div id="credits-card">
+    <h2 id="credits-title">Data sources &amp; credits</h2>
+    <dl>
+      <dt>Helsinki transit</dt>
+      <dd>&#169; Helsinki Region Transport (HSL) 2026, licensed under
+        <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>.</dd>
+
+      <dt>Amsterdam transit</dt>
+      <dd>Dutch integrated transit data published by Stichting OpenGeo
+        (<a href="https://gtfs.ovapi.nl/" target="_blank" rel="noopener noreferrer">gtfs.ovapi.nl</a>),
+        converted from NDOV Koppelvlakken open data, 2026.</dd>
+
+      <dt>Street geometry</dt>
+      <dd>&#169; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a>
+        contributors, licensed under
+        <a href="https://opendatacommons.org/licenses/odbl/" target="_blank" rel="noopener noreferrer">ODbL</a>.</dd>
+    </dl>
+    <p class="disclaimer">This is an independent visualization. It is not affiliated
+      with, endorsed by, and does not represent any transit agency.</p>
+    <button id="credits-close" type="button">Close</button>
+  </div>
+</div>
+<script type="module" src="app.js"></script>
+</body></html>

@@ -1,0 +1,73 @@
+{
+  "landing_default": "helsinki",
+  "cities": [
+    {
+      "slug": "amsterdam",
+      "display_name": "Amsterdam",
+      "coverage_note": "OVapi national NL GTFS feed, clipped to the Amsterdam metro area",
+      "region_bbox": [
+        4.72,
+        52.28,
+        5.07,
+        52.43
+      ],
+      "subareas": {
+        "Amsterdam": [
+          4.72,
+          52.28,
+          5.07,
+          52.43
+        ]
+      },
+      "intro_bbox": [
+        4.72,
+        52.28,
+        5.07,
+        52.43
+      ]
+    },
+    {
+      "slug": "helsinki",
+      "display_name": "Helsinki",
+      "coverage_note": "HSL \u2014 complete Helsinki-region network",
+      "region_bbox": [
+        24.4,
+        60.05,
+        25.35,
+        60.45
+      ],
+      "subareas": {
+        "Helsinki": [
+          24.78,
+          60.13,
+          25.06,
+          60.24
+        ],
+        "Espoo": [
+          24.5,
+          60.13,
+          24.83,
+          60.34
+        ],
+        "Vantaa": [
+          24.8,
+          60.24,
+          25.15,
+          60.35
+        ],
+        "Kauniainen": [
+          24.71,
+          60.2,
+          24.76,
+          60.23
+        ]
+      },
+      "intro_bbox": [
+        24.78,
+        60.13,
+        25.06,
+        60.24
+      ]
+    }
+  ]
+}
