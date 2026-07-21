@@ -27,6 +27,31 @@
       ]
     },
     {
+      "slug": "berlin",
+      "display_name": "Berlin",
+      "coverage_note": "VBB Berlin-Brandenburg GTFS feed, clipped to the Berlin metro area. Data: VBB Verkehrsverbund Berlin-Brandenburg GmbH (CC BY 4.0).",
+      "region_bbox": [
+        13.09,
+        52.34,
+        13.77,
+        52.68
+      ],
+      "subareas": {
+        "Berlin": [
+          13.09,
+          52.34,
+          13.77,
+          52.68
+        ]
+      },
+      "intro_bbox": [
+        13.09,
+        52.34,
+        13.77,
+        52.68
+      ]
+    },
+    {
       "slug": "helsinki",
       "display_name": "Helsinki",
       "coverage_note": "HSL \u2014 complete Helsinki-region network",
