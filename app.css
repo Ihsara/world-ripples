@@ -16,14 +16,13 @@ body { font: 15px/1.45 system-ui, sans-serif; color: #e8e8ec; background: #10142
 
 #city-picker { display: flex; gap: 6px; flex-wrap: wrap; }
 #aoi-picker { display: flex; gap: 6px; flex-wrap: wrap; }
-#city-picker button, #aoi-picker button, #speed-presets button, #play-pause, #transport button {
+#city-picker button, #aoi-picker button, #play-pause, #transport button {
   padding: 6px 14px; border: 1px solid #2a313d; background: rgba(16,20,32,.82); color: #c7ccd6;
   border-radius: 999px; cursor: pointer; font: inherit; font-size: 13px; transition: all .15s;
 }
-#city-picker button.active, #aoi-picker button.active, #speed-presets button.active {
+#city-picker button.active, #aoi-picker button.active {
   background: #6fd3e6; color: #061014; border-color: #6fd3e6; font-weight: 600;
 }
-#speed-presets { display: flex; gap: 6px; }
 #transport { display: inline-flex; gap: 6px; align-items: center; }
 #play-pause { min-width: 40px; text-align: center; }
 #clock { font-variant-numeric: tabular-nums; font-size: 15px; color: #fff; }
@@ -58,6 +57,29 @@ body { font: 15px/1.45 system-ui, sans-serif; color: #e8e8ec; background: #10142
 }
 #credits-btn:hover, #credits-btn:focus-visible { opacity: 1; background: rgba(16,20,32,.92); }
 #credits-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+#fullscreen-btn {
+  position: fixed; right: 86px; bottom: 14px; z-index: 7;
+  width: 28px; height: 28px; padding: 0; border-radius: 50%;
+  border: 1px solid #2a313d; background: rgba(16,20,32,.7); color: #c7ccd6;
+  font: 13px/1 system-ui, sans-serif; text-align: center; cursor: pointer;
+  opacity: .55; transition: opacity .15s, background .15s;
+}
+#fullscreen-btn:hover, #fullscreen-btn:focus-visible { opacity: 1; background: rgba(16,20,32,.92); }
+#fullscreen-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+#transport { justify-content: center; }
+#speed-readout { min-width: 3.2em; text-align: center; color: #fff;
+  font-variant-numeric: tabular-nums; font-size: 13px; }
+#clock, #whisper { text-align: center; }
+
+/* Idle-hide: in fullscreen the chrome gets out of the way and returns on move. */
+body.chrome-hidden #chrome,
+body.chrome-hidden #fullscreen-btn,
+body.chrome-hidden #help-btn,
+body.chrome-hidden #credits-btn,
+body.chrome-hidden #district-panel { opacity: 0; pointer-events: none;
+  transition: opacity .4s; }
 
 /* ---------- intro overlay + click-stepper ----------
    Bremer/Visual Cinnamon pattern: quiet, semi-transparent dark panels,
@@ -124,7 +146,7 @@ body { font: 15px/1.45 system-ui, sans-serif; color: #e8e8ec; background: #10142
 #intro-begin:hover, #step-next:hover, #step-explore:hover { background: #8fe0f0; }
 #intro-begin:focus-visible, #step-next:focus-visible, #step-explore:focus-visible,
 #play-pause:focus-visible, #aoi-picker button:focus-visible,
-#speed-presets button:focus-visible, #transport button:focus-visible {
+#transport button:focus-visible {
   outline: 2px solid #fff; outline-offset: 2px;
 }
 
@@ -159,6 +181,18 @@ body { font: 15px/1.45 system-ui, sans-serif; color: #e8e8ec; background: #10142
 #dp-list button.active { background: rgba(111,211,230,.18); color: #6fd3e6; }
 #dp-list button:focus-visible { outline: 2px solid #fff; outline-offset: -2px; }
 
+#dp-cities { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 6px 8px; }
+.dp-cityswitch { padding: 4px 10px; border: 1px solid #2a313d; border-radius: 999px;
+  background: rgba(16,20,32,.82); color: #c7ccd6; cursor: pointer; font: inherit;
+  font-size: 12px; }
+.dp-cityswitch.active { background: #6fd3e6; color: #061014; border-color: #6fd3e6;
+  font-weight: 600; }
+#dp-search { width: calc(100% - 12px); margin: 0 6px 8px; padding: 6px 10px;
+  border: 1px solid #2a313d; border-radius: 8px; background: rgba(10,13,22,.9);
+  color: #e8e8ec; font: inherit; font-size: 13px; }
+#dp-search:focus-visible { outline: 2px solid #6fd3e6; outline-offset: -1px; }
+.dp-empty { padding: 8px 10px; color: #7d8494; font-size: 12px; }
+
 @media (max-width: 640px) {
   /* bottom sheet: tab sits above the chrome bar; body slides up full-width */
   #district-panel { top: auto; right: 0; left: 0; bottom: 0; align-items: flex-end;
@@ -173,7 +207,7 @@ body { font: 15px/1.45 system-ui, sans-serif; color: #e8e8ec; background: #10142
 @media (max-width: 640px) {
   #chrome { padding: 8px 10px 12px; }
   #aoi-picker { justify-content: center; }
-  #aoi-picker button, #speed-presets button, #play-pause, #transport button { padding: 5px 10px; font-size: 12px; }
+  #aoi-picker button, #play-pause, #transport button { padding: 5px 10px; font-size: 12px; }
   #clock { text-align: center; }
   #intro-card, #stepper-card { padding: 20px 20px; }
   #intro-title { font-size: 19px; }

@@ -19,8 +19,9 @@ import { makeProjection, eventsInWindow, RippleField, realAge, clampSkip,
 import { vehiclePosition } from "./vehicles.js";
 import { createCamera, cameraProjection, panBy, zoomAboutPoint, resizeCamera,
          startFlyTo, stepFlyTo, visibleBbox, viewWidthKm } from "./camera.js";
-import { createDistrictPanel } from "./panel.js";
-import { loadCities, resolveSlug, renderPicker } from "./cities.js";
+import { createPlacePanel } from "./panel.js";
+import { findById, flattenTree } from "./places.js";
+import { loadCities, resolveSlug } from "./cities.js";
 
 // ---- AOI bboxes (lon/lat), mirrored from src/region.py EXACTLY -----------
 // Helsinki-specific subareas (fly-to chips + the guided intro's zoomed-in
@@ -57,6 +58,43 @@ const DATA_ROOT = "./data";
 const dataDirFor = (slug) => `${DATA_ROOT}/${slug}`;
 const SPAWN_BUDGET = 200; // max stamped events per frame, even at 300x
 
+// The speed ladder. Stepping (not 4 chips) keeps the bar to one row and scales
+// if a speed is ever added. Clamps rather than wraps: wrapping from 300x back
+// to 1x is a surprise, not a convenience.
+export const SPEEDS = [1, 30, 60, 300];
+
+export function stepSpeed(current, dir) {
+  const i = SPEEDS.indexOf(current);
+  if (i === -1) {
+    // Unknown speed: snap to the nearest rung in the direction of travel.
+    const next = dir > 0 ? SPEEDS.find((s) => s > current) : [...SPEEDS].reverse().find((s) => s < current);
+    return next ?? (dir > 0 ? SPEEDS[SPEEDS.length - 1] : SPEEDS[0]);
+  }
+  return SPEEDS[Math.min(SPEEDS.length - 1, Math.max(0, i + dir))];
+}
+
+// Build a region-only fallback root when places.json is missing or malformed.
+// Must include a `ring` array because ringPath() iterates ring.length unguarded
+// (line 478); a ring-less node throws when the root row is clicked/hovered. The
+// fallback's shape must match the real baked root: ['id','name','bbox','ring','children'].
+export function regionOnlyRoot(slug, regionBbox, displayName) {
+  return { id: `region:${slug}`, name: displayName, bbox: regionBbox, ring: [], children: [] };
+}
+
+// Load one city's place tree. A missing/broken places.json must NOT break the
+// app: fall back to a region-only root so navigation still works.
+async function loadPlaces(slug, regionBbox, displayName) {
+  try {
+    const resp = await fetch(`${dataDirFor(slug)}/places.json`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const payload = await resp.json();
+    return payload.root;
+  } catch (err) {
+    console.warn(`places.json unavailable for ${slug}; region-only`, err);
+    return regionOnlyRoot(slug, regionBbox, displayName);
+  }
+}
+
 // Deep-link contract (world-ripples): ?city=<slug>&area=<AOI>&t=HH:MM&speed=1|30|60|300.
 // NOTE the Phase B split: `?city=` now selects the CITY BUNDLE; the sub-area
 // moved to `?area=`. There is deliberately NO aliasing — an unknown ?city=
@@ -70,6 +108,12 @@ export function parseDeepLink(search, aoiNames) {
     ? aoiNames.find((n) => n.toLowerCase() === areaParam.toLowerCase()) || null
     : null;
 
+  // ?place=<node id>. Ids contain a colon ("osm:404538"), which is legal
+  // unencoded in a query value. Raw pass-through; the caller resolves it
+  // against the loaded tree and ignores an unknown id.
+  const placeRaw = q.get("place");
+  const place = placeRaw && placeRaw.trim() ? placeRaw.trim() : null;
+
   const tRaw = q.get("t") || "";
   const m = /^(\d{2}):(\d{2})$/.exec(tRaw);
   const timeHHMM = m && Number(m[1]) < 24 && Number(m[2]) < 60 ? tRaw : null;
@@ -77,7 +121,7 @@ export function parseDeepLink(search, aoiNames) {
   const speedParam = Number(q.get("speed"));
   const speed = [1, 30, 60, 300].includes(speedParam) ? speedParam : null;
 
-  return { city: q.get("city"), area, timeHHMM, speed };
+  return { city: q.get("city"), area, place, timeHHMM, speed };
 }
 
 // mode name -> code, matching ripplesim.vehicles._MODE_CODE / bake_ripples._MODE_CODE.
@@ -114,15 +158,16 @@ const STORY_STOP_PAIR = [1893, 2841]; // tram + bus, ~90m apart
 async function initApp() {
   const canvas = document.getElementById("map");
   const statusEl = document.getElementById("status");
+  if (statusEl && new URLSearchParams(location.search).get("debug") === "1") {
+    statusEl.hidden = false;
+  }
   const clockEl = document.getElementById("clock");
   const whisperEl = document.getElementById("whisper");
   const scrubberEl = document.getElementById("scrubber");
   const playPauseEl = document.getElementById("play-pause");
   const skipBackEl = document.getElementById("skip-back");
   const skipFwdEl = document.getElementById("skip-fwd");
-  const speedButtons = Array.from(document.querySelectorAll("#speed-presets button"));
-  const aoiPickerEl = document.getElementById("aoi-picker");
-  let aoiButtons = [];
+  const speedReadout = document.getElementById("speed-readout");
   const chromeEl = document.getElementById("chrome");
   const introEl = document.getElementById("intro");
   const introBeginEl = document.getElementById("intro-begin");
@@ -168,6 +213,10 @@ async function initApp() {
     // 5. Drop the panel handle. Its listeners died with step 2; this stops the
     //    session object itself from pointing at the detached row elements.
     s.panel = null;
+    // 6. Clear the idle-hide timer. abort() does not cancel pending timers, so
+    //    a stale timer must be cleared explicitly to prevent it from hiding the
+    //    new city's chrome after a switch.
+    if (s.idleTimer !== null) clearTimeout(s.idleTimer);
   }
 
   // Guards against overlapping switches: two boots awaiting loadAll() at once
@@ -210,23 +259,14 @@ async function initApp() {
     teardown();
 
     const abort = new AbortController();
-    const session = { rafHandle: null, abort, field: null, data: d, panel: null };
+    const session = { rafHandle: null, abort, field: null, data: d, panel: null, idleTimer: null };
     currentSession = session;
 
   const manifest = d.manifest;
   const activeEntry = cityEntry(slug);
-  const activeSubareas = (activeEntry && activeEntry.subareas) || {};
-  if (aoiPickerEl) {
-    const areas = [["region", "Region"], ...Object.keys(activeSubareas).map((name) => [name, name])];
-    aoiPickerEl.replaceChildren(...areas.map(([name, label]) => {
-      const button = document.createElement("button");
-      button.dataset.aoi = name;
-      button.textContent = label;
-      button.classList.toggle("active", name === "region");
-      return button;
-    }));
-    aoiButtons = Array.from(aoiPickerEl.querySelectorAll("button"));
-  }
+  const placeTree = await loadPlaces(slug, cameraBboxFor(slug),
+    activeEntry ? activeEntry.display_name : slug);
+  const placeNames = flattenTree(placeTree).map((r) => r.name);
   const dataMin = manifest.data_min;
   const dataMax = manifest.data_max;
   const dataSpan = Math.max(1, dataMax - dataMin);
@@ -254,7 +294,6 @@ async function initApp() {
   const streets = d.streets;
   const stops = d.stops; // flat [x0,y0, x1,y1, ...] per stop (lon/lat)
   const horizonSec = manifest.horizon_sec;
-  const districts = d.districts; // Task 5 bake: {source, <city>: [{name,bbox,ring}...]} or null (older deploy)
 
   // v2.1: band params are REAL-seconds tuned (see field.js realAge). Prefer
   // the manifest's ripple_real block; fall back to the same values hardcoded
@@ -309,8 +348,7 @@ async function initApp() {
     t: 18000, // 08:00 sim-sec — a busy frame, inside [dataMin, dataMax]
     speed: 60,
     paused: false,
-    aoi: "region",
-    district: null, // null | {name, bbox, ring} — a focused district within state.aoi's city
+    district: null, // null | place-tree node {id, name, bbox, ring} — the highlighted place
     sePtr: 0,
     proj: null,
     lastFrameTs: null,
@@ -320,8 +358,9 @@ async function initApp() {
   // clock/speed/framing back to the URL every time a chip is clicked, undoing
   // wherever the user had navigated to. (sim_origin_sec is per-city, which is
   // why the time conversion has to live inside boot rather than above it.)
-  const link = parseDeepLink(window.location.search, ["region", ...Object.keys(activeSubareas)]);
-  const deepLinkCity = isSwitch ? null : link.area; // sub-area framing (was ?city=, now ?area=)
+  const link = parseDeepLink(window.location.search, placeNames);
+  const deepLinkArea = isSwitch ? null : link.area; // back-compat ?area=<name> framing
+  const deepLinkPlace = isSwitch ? null : link.place; // precise ?place=<id> framing
   const deepLinkSpeed = isSwitch ? null : link.speed;
   const deepLinkTime = (!isSwitch && link.timeHHMM)
     ? Number(link.timeHHMM.slice(0, 2)) * 3600 + Number(link.timeHHMM.slice(3, 5)) * 60 - manifest.sim_origin_sec
@@ -498,28 +537,35 @@ async function initApp() {
     }
   }
 
-  // ---- v2.2 district panel: navigation + highlight only ------------------
+  // ---- place tree panel: navigation + highlight only ----------------------
   state.hoverDistrict = null; // pre-glow outline (hover), independent of selection
 
+  // setHighlightOutline/setHoverOutline take a place-tree node (same
+  // {bbox, ring} shape the old schema-2 district entries had), so
+  // drawDistrictOutline needs no change.
+  function setHighlightOutline(node) {
+    state.district = node;
+    drawDistrictOutline();
+  }
+  function setHoverOutline(node) {
+    state.hoverDistrict = node;
+    drawDistrictOutline();
+  }
+
   const panelRoot = document.getElementById("district-panel");
-  const districtPanel = createDistrictPanel(panelRoot,
-    (districts && districts.schema === 2) ? districts : null, {
-    onSelect(entry) {
-      state.district = entry;
-      districtPanel.setActive(entry);
-      flyToBbox(entry.bbox);
-      drawDistrictOutline();
-    },
-    onHover(entry) {
-      state.hoverDistrict = entry;
-      drawDistrictOutline();
-    },
+  const placePanel = createPlacePanel(panelRoot, {
+    tree: placeTree,
+    cities: registry ? registry.cities : [],
+    activeSlug: slug,
+    onSelect: (node) => focusPlace(node),
+    onCity: (nextSlug) => onSelectCity(nextSlug),
+    onHover: (node) => setHoverOutline(node),
     // Session-scoped: without this the detached rows from the previous city
     // keep their handlers alive, pinning the old boot scope (and its ~20 MB
     // data bundle) even after teardown() nulls session.data.
     signal: abort.signal,
   });
-  session.panel = districtPanel;
+  session.panel = placePanel;
 
   // The #overlay canvas persists across boots, so the previous city's district
   // ring would stay painted until some later hover/selection repaint. state is
@@ -608,11 +654,14 @@ async function initApp() {
   }, { signal: abort.signal });
 
   // ---- speed / pause controls ---------------------------------------------
-  function setSpeed(v) {
-    state.speed = v;
-    speedButtons.forEach((b) => b.classList.toggle("active", parseFloat(b.dataset.speed) === v));
+  function applySpeed(next) {
+    state.speed = next;
+    if (speedReadout) speedReadout.textContent = `${next}×`;
   }
-  speedButtons.forEach((b) => b.addEventListener("click", () => setSpeed(parseFloat(b.dataset.speed)), { signal: abort.signal }));
+  document.getElementById("speed-up")?.addEventListener("click",
+    () => applySpeed(stepSpeed(state.speed, +1)), { signal: abort.signal });
+  document.getElementById("speed-down")?.addEventListener("click",
+    () => applySpeed(stepSpeed(state.speed, -1)), { signal: abort.signal });
 
   function setPaused(p) {
     state.paused = p;
@@ -622,8 +671,8 @@ async function initApp() {
   }
   playPauseEl.addEventListener("click", () => setPaused(!state.paused), { signal: abort.signal });
   setPaused(false);
-  setSpeed(60);
-  if (deepLinkSpeed !== null) setSpeed(deepLinkSpeed);
+  applySpeed(60);
+  if (deepLinkSpeed !== null) applySpeed(deepLinkSpeed);
 
   // ---- ±15min skip: identical hard-jump idiom to the scrubber handler
   // above (clear the field, resync sePtr, drop stale in-flight wavefronts).
@@ -649,26 +698,14 @@ async function initApp() {
     setPaused(!state.paused);
   }, { signal: abort.signal });
 
-  // AOI chips are fly-to shortcuts now (spec Q4-A): no filtering, no field
-  // clear, no sePtr resync — the camera just travels. state.district stays
-  // in the state object for Task 5's panel (the highlighted district).
-  function focusAOI(name) {
-    // "region" now means "the active city's region", not the Helsinki
-    // constant, so a non-Helsinki city's "Region" chip (and STORY_STEPS'
-    // step 3, which calls focusAOI("region")) flies to ITS OWN bbox. A name
-    // with no known bbox at all (defensive — an unknown name must not call
-    // flyToBbox(undefined))
-    // is a no-op fly, matching the "degrade safely" requirement.
-    const bbox = name === "region" ? regionBbox : activeSubareas[name];
-    if (!bbox) return;
-    state.aoi = name;
-    state.district = null;
-    districtPanel.setActive(null);
-    aoiButtons.forEach((b) => b.classList.toggle("active", b.dataset.aoi === name));
-    flyToBbox(bbox);
-    drawDistrictOutline();
+  // Fly to any node. The ROOT is the region, so "all of <city>" needs no
+  // special case -- which is precisely why the Region chip is gone.
+  function focusPlace(node) {
+    if (!node || !node.bbox) return;
+    flyToBbox(node.bbox);
+    placePanel.setActive(node.id);
+    setHighlightOutline(node);
   }
-  aoiButtons.forEach((b) => b.addEventListener("click", () => focusAOI(b.dataset.aoi), { signal: abort.signal }));
 
   // ---- initial cursor position --------------------------------------------
   state.sePtr = lowerBound(eventTime, state.t);
@@ -699,11 +736,19 @@ async function initApp() {
   } else {
     introBeginEl.focus();
   }
-  if (deepLinkCity !== null || deepLinkTime !== null) {
+  if (deepLinkArea !== null || deepLinkPlace !== null || deepLinkTime !== null) {
     introEl.hidden = true;
     chromeEl.hidden = false;
   }
-  if (deepLinkCity !== null && deepLinkCity !== "region") focusAOI(deepLinkCity);
+  if (deepLinkPlace !== null) {
+    const node = findById(placeTree, deepLinkPlace);
+    if (node) focusPlace(node);
+  } else if (deepLinkArea !== null) {
+    // Back-compat: ?area=<name>, case-insensitive, first match wins.
+    const want = deepLinkArea.toLowerCase();
+    const hit = flattenTree(placeTree).find((r) => r.name.toLowerCase() === want);
+    if (hit) focusPlace(hit.node);
+  }
   introBeginEl.addEventListener("click", dismissIntro, { signal: abort.signal });
 
   helpBtnEl.addEventListener("click", () => {
@@ -734,6 +779,25 @@ async function initApp() {
       if (e.key === "Escape" && !creditsEl.hidden) closeCredits();
     }, { signal: abort.signal });
   }
+
+  // Fullscreen. requestFullscreen rejects if not user-initiated; a click
+  // handler satisfies that, and a rejection must not break playback.
+  const fsBtn = document.getElementById("fullscreen-btn");
+  fsBtn?.addEventListener("click", () => {
+    if (document.fullscreenElement) document.exitFullscreen?.();
+    else document.documentElement.requestFullscreen?.().catch((e) =>
+      console.warn("fullscreen refused", e));
+  }, { signal: abort.signal });
+
+  function wakeChrome() {
+    document.body.classList.remove("chrome-hidden");
+    clearTimeout(session.idleTimer);
+    if (document.fullscreenElement) {
+      session.idleTimer = setTimeout(() => document.body.classList.add("chrome-hidden"), 2600);
+    }
+  }
+  document.addEventListener("mousemove", wakeChrome, { signal: abort.signal });
+  document.addEventListener("fullscreenchange", wakeChrome, { signal: abort.signal });
 
   // ---- guided intro: 3-step click-stepper (Task 10) -----------------------
   // Bremer/Visual Cinnamon click-stepper: a step counter + a single "Next"
@@ -774,8 +838,8 @@ async function initApp() {
       caption: "Now the whole morning — thousands of ripples, the city breathing in light.",
       run() {
         introProj = null;         // hand the view back to the free camera
-        focusAOI("region");
-        setSpeed(60);
+        focusPlace(placeTree);    // the root IS the region -- no special case
+        applySpeed(60);
         setPaused(false);
       },
     },
@@ -1228,7 +1292,6 @@ async function initApp() {
   // a switch is in flight, and is what a FAILED switch rolls the UI back to.
   let currentSlug = activeSlug;
 
-  const pickerEl = document.getElementById("city-picker");
   const noteEl = document.getElementById("coverage-note");
 
   function cityEntry(slug) {
@@ -1251,24 +1314,20 @@ async function initApp() {
   // therefore strict mode, where arguments.callee throws.
   async function onSelectCity(slug) {
     activeSlug = slug;
-    // renderPicker calls el.replaceChildren() first, so re-rendering replaces
-    // the old buttons wholesale — its per-button listeners die with the
-    // detached nodes and need no AbortController of their own.
-    renderPicker(pickerEl, registry, activeSlug, onSelectCity);
     showCoverageNote(slug);
     const ok = await boot(slug);
     if (!ok) {
-      // Failed switch: the PREVIOUS city is still rendered, so the picker and
-      // note must be rolled back to match what is actually on screen.
+      // Failed switch: the PREVIOUS city is still rendered, so the note must
+      // be rolled back to match what is actually on screen. The place panel
+      // itself is rebuilt on every boot() (createPlacePanel with the new
+      // activeSlug), so there is no separate picker to roll back here.
       activeSlug = currentSlug;
-      renderPicker(pickerEl, registry, activeSlug, onSelectCity);
       showCoverageNote(activeSlug);
       return;
     }
     currentSlug = activeSlug;
   }
 
-  if (pickerEl && registry) renderPicker(pickerEl, registry, activeSlug, onSelectCity);
   showCoverageNote(activeSlug);
 
   await boot(activeSlug);

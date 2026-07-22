@@ -32,19 +32,17 @@
   <div id="clock">–</div>
   <div id="whisper"></div>
   <input id="scrubber" type="range" min="0" max="1" step="0.0001" value="0">
-  <div id="speed-presets"><button data-speed="1">1×</button><button data-speed="30">30×</button><button data-speed="60" class="active">60×</button><button data-speed="300">300×</button></div>
   <div id="transport">
     <button id="skip-back" type="button" title="Back 15 min" aria-label="Back 15 minutes">−15m</button>
+    <button id="speed-down" type="button" title="Slower" aria-label="Slower">◀◀</button>
+    <span id="speed-readout" aria-live="polite" aria-label="Playback speed">60×</span>
+    <button id="speed-up" type="button" title="Faster" aria-label="Faster">▶▶</button>
     <button id="play-pause" aria-pressed="false" title="Pause (Space)" aria-label="Pause">⏸</button>
     <button id="skip-fwd" type="button" title="Forward 15 min" aria-label="Forward 15 minutes">+15m</button>
   </div>
-  <div id="city-picker" hidden></div>
-  <!-- Populated from the ACTIVE city's subareas (cities.json) by app.js. Left
-       empty on purpose: hardcoded chips here would be Helsinki-only again. -->
-  <div id="aoi-picker"></div>
-  <div id="status"></div>
   <button id="help-btn" type="button" title="How to read this" aria-label="How to read this">?</button>
   <button id="credits-btn" type="button" title="Data sources &amp; credits" aria-label="Data sources and credits">&#169;</button>
+  <button id="fullscreen-btn" type="button" title="Fullscreen" aria-label="Toggle fullscreen">⛶</button>
 </div>
 
 <!-- Attribution is a LICENCE OBLIGATION, not decoration: HSL's data is CC BY 4.0
@@ -79,5 +77,8 @@
     <button id="credits-close" type="button">Close</button>
   </div>
 </div>
+<!-- Perf readout: hidden unless ?debug=1. It is a developer instrument, not
+     part of the interface. -->
+<div id="status" hidden></div>
 <script type="module" src="app.js"></script>
 </body></html>
