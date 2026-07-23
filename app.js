@@ -13,15 +13,15 @@
 // vehicle dots are interpolated in JS at playback (Option A) and impact dots
 // flash at a stop the instant its event fires.
 
-import { loadAll } from "./data.js";
+import { loadAll } from "./data.js?v=2e8fe65b76";
 import { makeProjection, eventsInWindow, RippleField, realAge, clampSkip,
-         rippleLifeHorizon, nextEventInView, whisperText } from "./field.js";
-import { vehiclePosition } from "./vehicles.js";
+         rippleLifeHorizon, nextEventInView, whisperText } from "./field.js?v=2e8fe65b76";
+import { vehiclePosition } from "./vehicles.js?v=2e8fe65b76";
 import { createCamera, cameraProjection, panBy, zoomAboutPoint, resizeCamera,
-         startFlyTo, stepFlyTo, visibleBbox, viewWidthKm } from "./camera.js";
-import { createPlacePanel } from "./panel.js";
-import { findById, flattenTree } from "./places.js";
-import { loadCities, resolveSlug } from "./cities.js";
+         startFlyTo, stepFlyTo, visibleBbox, viewWidthKm } from "./camera.js?v=2e8fe65b76";
+import { createPlacePanel } from "./panel.js?v=2e8fe65b76";
+import { findById, flattenTree } from "./places.js?v=2e8fe65b76";
+import { loadCities, resolveSlug } from "./cities.js?v=2e8fe65b76";
 
 // ---- AOI bboxes (lon/lat), mirrored from src/region.py EXACTLY -----------
 // Helsinki-specific subareas (fly-to chips + the guided intro's zoomed-in
