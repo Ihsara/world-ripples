@@ -68,6 +68,12 @@ body { font: 15px/1.45 system-ui, sans-serif; color: #e8e8ec; background: #10142
 #fullscreen-btn:hover, #fullscreen-btn:focus-visible { opacity: 1; background: rgba(16,20,32,.92); }
 #fullscreen-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 
+/* #utility groups the three chips so narrow viewports can lay them out as one
+   row (see the max-width:430px block). display:contents makes the wrapper
+   generate no box here, so each button keeps the position:fixed corner
+   placement above and desktop rendering is byte-identical to before. */
+#utility { display: contents; }
+
 #transport { justify-content: center; }
 #speed-readout { min-width: 3.2em; text-align: center; color: #fff;
   font-variant-numeric: tabular-nums; font-size: 13px; }
@@ -212,4 +218,42 @@ body.chrome-hidden #district-panel { opacity: 0; pointer-events: none;
   #intro-card, #stepper-card { padding: 20px 20px; }
   #intro-title { font-size: 19px; }
   #stepper { padding-bottom: 140px; }
+}
+
+/* ---------- NARROW PHONES ----------
+   The three utility chips (help / credits / fullscreen) are position:fixed at
+   bottom:14px, right 14/50/86px, so they own the rightmost ~100px of the same
+   vertical band the centred #transport row occupies. On a wide viewport there
+   is clearance; at 390px the transport row grows into that band and the "+15m"
+   button collides with the fullscreen chip.
+
+   Rather than shrink everything further, stop making two layers compete for one
+   row: below 430px the utility chips leave the fixed layer and become a normal
+   centred row INSIDE #chrome, above the transport controls. One column, no
+   overlap, and nothing has to be hunted for in a corner. */
+@media (max-width: 430px) {
+  /* The wrapper becomes a real flex ROW so the three chips share one line.
+     (display:contents on desktop means this rule is the only place #utility
+     ever behaves as a box.) */
+  #utility {
+    display: flex; justify-content: center; align-items: center; gap: 14px;
+    order: 5;                /* last in #chrome's column: clock, whisper,
+                                scrubber, transport, then this row */
+    margin-top: 2px;
+  }
+  #help-btn, #credits-btn, #fullscreen-btn {
+    position: static;        /* leave the fixed layer that caused the overlap */
+    opacity: .75;            /* no longer floating over the map, so lift them
+                                out of the near-invisible .55 resting state */
+    width: 34px; height: 34px;   /* 28px is a small touch target; these are now
+                                    primary controls, not corner affordances */
+  }
+
+  #transport { order: 4; flex-wrap: wrap; gap: 5px; }
+  #transport button, #play-pause { padding: 6px 9px; font-size: 12px; }
+
+  /* The panel tab's 148px bottom margin was cleared for the OLD chrome height;
+     the utility row adds ~40px, so lift it to keep the tab clear of the bar. */
+  #dp-tab { margin-bottom: 190px; }
+  #stepper { padding-bottom: 180px; }
 }

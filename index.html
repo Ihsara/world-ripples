@@ -40,9 +40,15 @@
     <button id="play-pause" aria-pressed="false" title="Pause (Space)" aria-label="Pause">⏸</button>
     <button id="skip-fwd" type="button" title="Forward 15 min" aria-label="Forward 15 minutes">+15m</button>
   </div>
-  <button id="help-btn" type="button" title="How to read this" aria-label="How to read this">?</button>
-  <button id="credits-btn" type="button" title="Data sources &amp; credits" aria-label="Data sources and credits">&#169;</button>
-  <button id="fullscreen-btn" type="button" title="Fullscreen" aria-label="Toggle fullscreen">⛶</button>
+  <!-- #utility wraps the three chips so a narrow viewport can lay them out as
+       ONE flex row inside the chrome column. On desktop the wrapper is
+       display:contents, so the buttons keep their original position:fixed
+       corner placement and the DOM change is invisible there. -->
+  <div id="utility">
+    <button id="help-btn" type="button" title="How to read this" aria-label="How to read this">?</button>
+    <button id="credits-btn" type="button" title="Data sources &amp; credits" aria-label="Data sources and credits">&#169;</button>
+    <button id="fullscreen-btn" type="button" title="Fullscreen" aria-label="Toggle fullscreen">⛶</button>
+  </div>
 </div>
 
 <!-- Attribution is a LICENCE OBLIGATION, not decoration: HSL's data is CC BY 4.0
@@ -72,6 +78,13 @@
         <a href="https://www.data.gv.at/" target="_blank" rel="noopener noreferrer">data.gv.at</a>
         and licensed under
         <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>.</dd>
+
+      <dt>Zürich transit</dt>
+      <dd>Swiss national timetable from the
+        <a href="https://opentransportdata.swiss/" target="_blank" rel="noopener noreferrer">Open data platform mobility Switzerland</a>
+        2026, published by SBB on behalf of the Swiss Federal Office of Transport,
+        under its
+        <a href="https://opentransportdata.swiss/en/terms-of-use/" target="_blank" rel="noopener noreferrer">terms of use</a>.</dd>
 
       <dt>Street geometry</dt>
       <dd>&#169; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a>

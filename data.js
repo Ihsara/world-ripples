@@ -8,7 +8,13 @@ export async function loadManifest(dir) {
   return r.json();
 }
 export async function loadBin(dir, name, dtype) {
-  const r = await fetch(`${dir}/${name}.bin`);
+  // Percent-encode the FILENAME (not `dir`, which carries real path separators).
+  // Bin names are built from subarea names, and Zurich is the first city whose
+  // subarea is non-ASCII: `street_Zürich_seg.bin`. Served raw, that path 404s —
+  // verified against a local static server, where the raw form returned 404 and
+  // the percent-encoded form returned 200. Browsers often normalize this for you;
+  // "often" is not a deploy guarantee.
+  const r = await fetch(`${dir}/${encodeURIComponent(name)}.bin`);
   if (!r.ok) throw new Error(`Failed to fetch ${name}.bin: ${r.status} ${r.statusText}`);
   const buf = await r.arrayBuffer();
   return new CTOR[dtype](buf);

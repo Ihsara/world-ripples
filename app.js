@@ -182,6 +182,36 @@ async function initApp() {
   const creditsCloseEl = document.getElementById("credits-close");
   const INTRO_SEEN_KEY = "hr-intro-seen";
 
+  // ---- Pixel basis: CSS px vs device px ----------------------------------
+  // Two bases coexist and must not be mixed up:
+  //   CSS px    - camera, projection, pointer events (e.clientX/Y), hit-testing
+  //   device px - canvas backing buffers, gl.viewport, RippleField textures
+  // canvas.clientWidth is CSS px; canvas.width is device px. Assigning one from
+  // the other (the pre-fix code) makes the browser upscale a too-small buffer.
+  //
+  // FIELD_DPR_CAP: the GL field allocates 2 full-screen float textures, so cost
+  // scales with dpr^2 — an uncapped DPR-3 phone would pay 9x the fill rate and
+  // texture memory. Capping at 2 keeps ~all the perceptual win for 4x, not 9x.
+  // The 2D overlay (text/rings) is cheap, so it gets the real DPR and stays
+  // fully crisp.
+  const FIELD_DPR_CAP = 2;
+  function rawDpr() {
+    const d = window.devicePixelRatio;
+    return Number.isFinite(d) && d > 0 ? d : 1;
+  }
+  function fieldDpr() { return Math.min(rawDpr(), FIELD_DPR_CAP); }
+  // clientWidth reads 0 before layout settles (a real risk on mobile), and the
+  // old `|| window.innerWidth` fallback silently swapped in a DIFFERENT basis
+  // when it did. Fall back only on a non-positive read, and keep it explicit.
+  function cssWidth() {
+    const w = canvas.clientWidth;
+    return w > 0 ? w : window.innerWidth;
+  }
+  function cssHeight() {
+    const h = canvas.clientHeight;
+    return h > 0 ? h : window.innerHeight;
+  }
+
   // ---- WebGL2 availability check (self-review requirement) --------------
   const gl = canvas.getContext("webgl2");
   if (!gl) {
@@ -420,8 +450,9 @@ async function initApp() {
   // ---- WebGL field + projection ------------------------------------------
   let field;
   try {
-    field = new RippleField(gl, { width: canvas.clientWidth || window.innerWidth,
-                                   height: canvas.clientHeight || window.innerHeight });
+    // Device px: the field's textures and gl.viewport are device-pixel sized.
+    field = new RippleField(gl, { width: Math.round(cssWidth() * fieldDpr()),
+                                   height: Math.round(cssHeight() * fieldDpr()) });
   } catch (err) {
     if (statusEl) statusEl.textContent = "This visualization needs WebGL2 with float render targets.";
     console.error("RippleField init failed", err);
@@ -450,8 +481,8 @@ async function initApp() {
   // canvas (the camera used to always sit over Helsinki's bbox regardless
   // of which city's data was loaded).
   const regionBbox = cameraBboxFor(slug);
-  const camera = createCamera(regionBbox, canvas.clientWidth || window.innerWidth,
-                              canvas.clientHeight || window.innerHeight, 24);
+  // CSS px: the camera shares a basis with the pointer events that drive it.
+  const camera = createCamera(regionBbox, cssWidth(), cssHeight(), 24);
   // Guided-intro framing is generated from CityConfig. Helsinki's generated
   // value remains its Helsinki subarea byte-for-byte; a region-only city uses
   // its sole named subarea (which is the region bbox).
@@ -472,11 +503,18 @@ async function initApp() {
   }
 
   function fitProjection() {
-    const w = canvas.clientWidth || window.innerWidth;
-    const h = canvas.clientHeight || window.innerHeight;
-    canvas.width = w;
-    canvas.height = h;
-    field.resize(w, h);
+    const w = cssWidth();
+    const h = cssHeight();
+    // Backing buffer in DEVICE pixels, CSS box left alone: without this the
+    // canvas allocates a CSS-pixel-sized buffer that the browser then upscales
+    // by devicePixelRatio, which is why the map looked crisp on a DPR-1 desktop
+    // and blurry on a DPR-2.5+ phone. Camera/projection stay in CSS pixels
+    // because the pointer handlers feed them raw e.clientX/clientY (CSS px) —
+    // scaling those too would break panning and zoom.
+    const dpr = fieldDpr();
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    field.resize(canvas.width, canvas.height);
     resizeCamera(camera, w, h);
     if (introProj !== null) {
       introProj = makeProjection(bboxObj(introBbox), w, h * STORY_TOP_FRAC, 24);
@@ -516,9 +554,17 @@ async function initApp() {
     return Math.max(0, 1 - Math.max(dx, dy)); // 1 inside, 0 one bbox-width away
   }
   function drawDistrictOutline() {
-    overlay.width = canvas.width;
-    overlay.height = canvas.height;
-    octx.clearRect(0, 0, overlay.width, overlay.height);
+    // The overlay carries text and hairline rings, so it gets the FULL device
+    // ratio (not the field's capped one) — it is cheap 2D and blurry letterforms
+    // are the most visible artifact. Buffer is device px; the ring geometry comes
+    // from state.proj in CSS px, so scale the context by dpr and keep drawing in
+    // CSS coordinates. setTransform (not scale) so repeated calls don't compound.
+    const dpr = rawDpr();
+    const cw = cssWidth(), ch = cssHeight();
+    overlay.width = Math.round(cw * dpr);
+    overlay.height = Math.round(ch * dpr);
+    octx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    octx.clearRect(0, 0, cw, ch);
     if (!state.proj) return;
     if (state.district) {
       const a = selectionAlpha(state.district.bbox);
@@ -816,8 +862,8 @@ async function initApp() {
         setPaused(true);
         // Top-cropped STATIC projection for the seeded ripple (clear of the
         // bottom stepper card) — the camera is bypassed during the tour.
-        introProj = makeProjection(bboxObj(introBbox), canvas.clientWidth,
-                                   canvas.clientHeight * STORY_TOP_FRAC, 24);
+        introProj = makeProjection(bboxObj(introBbox), cssWidth(),
+                                   cssHeight() * STORY_TOP_FRAC, 24);
         syncProjection();
         field.resize(canvas.width, canvas.height);
         seedStopRipple(STORY_STOP_SOLO);

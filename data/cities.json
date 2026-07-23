@@ -118,6 +118,31 @@
         16.58,
         48.33
       ]
+    },
+    {
+      "slug": "zurich",
+      "display_name": "Z\u00fcrich",
+      "coverage_note": "Swiss national GTFS timetable, clipped to the Z\u00fcrich metro area. S-Bahn, tram, bus and lake boats; funiculars and aerial cableways are shown as rail. Data: Open data platform mobility Switzerland (opentransportdata.swiss), published by SBB on behalf of the Swiss Federal Office of Transport.",
+      "region_bbox": [
+        8.4,
+        47.3,
+        8.68,
+        47.46
+      ],
+      "subareas": {
+        "Z\u00fcrich": [
+          8.4,
+          47.3,
+          8.68,
+          47.46
+        ]
+      },
+      "intro_bbox": [
+        8.4,
+        47.3,
+        8.68,
+        47.46
+      ]
     }
   ]
 }
