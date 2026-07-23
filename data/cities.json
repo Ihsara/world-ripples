@@ -93,6 +93,31 @@
         25.06,
         60.24
       ]
+    },
+    {
+      "slug": "vienna",
+      "display_name": "Vienna",
+      "coverage_note": "Wiener Linien GTFS feed (Vienna city transit: U-Bahn, tram and bus). Data: Wiener Linien GmbH & Co KG via data.gv.at (CC BY 4.0).",
+      "region_bbox": [
+        16.18,
+        48.11,
+        16.58,
+        48.33
+      ],
+      "subareas": {
+        "Vienna": [
+          16.18,
+          48.11,
+          16.58,
+          48.33
+        ]
+      },
+      "intro_bbox": [
+        16.18,
+        48.11,
+        16.58,
+        48.33
+      ]
     }
   ]
 }
