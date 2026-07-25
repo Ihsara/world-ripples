@@ -95,6 +95,31 @@
       ]
     },
     {
+      "slug": "nyc",
+      "display_name": "New York City",
+      "coverage_note": "MTA New York City Transit subway (regular schedule) and Staten Island Railway; Long Island Rail Road; Metro-North Railroad; NYCT local bus for all five boroughs (Bronx, Brooklyn, Manhattan, Queens, Staten Island); MTA Bus Company. Rail-outage shuttle buses (GTFS route_type 711) are folded into the bus mode alongside classic local buses; the Staten Island Railway (route_type 2, ships inside the subway feed) is shown as train, not metro. NOTE ON TIME WINDOW: the other cities animate a four-hour morning window (06:00-10:00); New York animates a shorter 90-minute morning-rush slice (06:00-07:30), anchored at the same 06:00 start, because the full federated nine-feed network exceeds the 25 MiB size budget over the longer window. No stops, routes, modes or feeds are dropped \u2014 every one of the nine MTA operators is fully represented; only the span of time SHOWN is shorter than the other cities'. Data: Metropolitan Transportation Authority, https://www.mta.info/developers.",
+      "region_bbox": [
+        -74.26,
+        40.49,
+        -73.68,
+        40.92
+      ],
+      "subareas": {
+        "New York City": [
+          -74.26,
+          40.49,
+          -73.68,
+          40.92
+        ]
+      },
+      "intro_bbox": [
+        -74.02,
+        40.7,
+        -73.93,
+        40.88
+      ]
+    },
+    {
       "slug": "vienna",
       "display_name": "Vienna",
       "coverage_note": "Wiener Linien GTFS feed (Vienna city transit: U-Bahn, tram and bus). Data: Wiener Linien GmbH & Co KG via data.gv.at (CC BY 4.0).",
