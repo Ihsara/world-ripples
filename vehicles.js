@@ -16,15 +16,30 @@ export function pointAtDistance(coordsXY, cumdist, d) {
   return [ax + (bx - ax) * f, ay + (by - ay) * f];
 }
 
-function shapePolyline(route, data) {
+// Memo cache for shapePolyline. The rAF loop calls it once per live trip per
+// frame (8,520 trips for NYC, 32,197 for Helsinki) and it rebuilt the whole
+// polyline as fresh nested arrays every time. Keyed on the shape's slice
+// identity (v0:vcount) within a city's flat shapeCoords array; a WeakMap on
+// `data.shapeCoords` holds the per-city caches so a city switch drops them
+// with the data instead of pinning the old bundle.
+const _polyCache = new WeakMap();
+
+export function shapePolyline(route, data) {
   const { v0, vcount } = route;
   const sc = data.shapeCoords, scd = data.shapeCumdist;
+  let byShape = _polyCache.get(sc);
+  if (byShape === undefined) { byShape = new Map(); _polyCache.set(sc, byShape); }
+  const key = v0 + ":" + vcount;
+  const hit = byShape.get(key);
+  if (hit !== undefined) return hit;
   const coords = [], cum = [];
   for (let i = 0; i < vcount; i++) {
     coords.push([sc[2 * (v0 + i)], sc[2 * (v0 + i) + 1]]);
     cum.push(scd[v0 + i]);
   }
-  return [coords, cum];
+  const pts = [coords, cum];
+  byShape.set(key, pts);
+  return pts;
 }
 
 export function vehiclePosition(trip, s, data) {

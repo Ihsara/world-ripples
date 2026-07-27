@@ -33,6 +33,18 @@ body { font: 15px/1.45 system-ui, sans-serif; color: #e8e8ec; background: #10142
 
 #status { font: 11px monospace; color: #5b6270; }
 
+/* City-switch loading indicator. The old city keeps animating during a switch
+   by design (app.js:270-273 -- teardown-then-fetch would black-screen on a
+   network failure), so without this a switch is indistinguishable from a hang. */
+#loading {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  padding: 0.6rem 1.1rem; border-radius: 999px;
+  background: rgba(0, 0, 0, 0.72); color: #fff;
+  font: 500 0.85rem/1 system-ui, sans-serif; letter-spacing: 0.02em;
+  pointer-events: none; z-index: 20;
+}
+#loading[hidden] { display: none; }
+
 /* Quiet, always-visible re-entry into the guided tour (Task 4 v2.1): a
    small circular chip, easy to ignore, easy to find. */
 #help-btn {

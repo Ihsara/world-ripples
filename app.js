@@ -13,15 +13,16 @@
 // vehicle dots are interpolated in JS at playback (Option A) and impact dots
 // flash at a stop the instant its event fires.
 
-import { loadAll } from "./data.js?v=2e8fe65b76";
+import { loadAll, makeCityCache } from "./data.js?v=d4dde99876";
 import { makeProjection, eventsInWindow, RippleField, realAge, clampSkip,
-         rippleLifeHorizon, nextEventInView, whisperText } from "./field.js?v=2e8fe65b76";
-import { vehiclePosition } from "./vehicles.js?v=2e8fe65b76";
+         rippleLifeHorizon, nextEventInView, whisperText } from "./field.js?v=d4dde99876";
+import { vehiclePosition } from "./vehicles.js?v=d4dde99876";
 import { createCamera, cameraProjection, panBy, zoomAboutPoint, resizeCamera,
-         startFlyTo, stepFlyTo, visibleBbox, viewWidthKm } from "./camera.js?v=2e8fe65b76";
-import { createPlacePanel } from "./panel.js?v=2e8fe65b76";
-import { findById, flattenTree } from "./places.js?v=2e8fe65b76";
-import { loadCities, resolveSlug } from "./cities.js?v=2e8fe65b76";
+         startFlyTo, stepFlyTo, visibleBbox, viewWidthKm, projectInto,
+         inflateBbox } from "./camera.js?v=d4dde99876";
+import { createPlacePanel } from "./panel.js?v=d4dde99876";
+import { findById, flattenTree } from "./places.js?v=d4dde99876";
+import { loadCities, resolveSlug } from "./cities.js?v=d4dde99876";
 
 // ---- AOI bboxes (lon/lat), mirrored from src/region.py EXACTLY -----------
 // Helsinki-specific subareas (fly-to chips + the guided intro's zoomed-in
@@ -161,6 +162,8 @@ async function initApp() {
   if (statusEl && new URLSearchParams(location.search).get("debug") === "1") {
     statusEl.hidden = false;
   }
+  const loadingEl = document.getElementById("loading");
+  const showLoading = (on) => { if (loadingEl) loadingEl.hidden = !on; };
   const clockEl = document.getElementById("clock");
   const whisperEl = document.getElementById("whisper");
   const scrubberEl = document.getElementById("scrubber");
@@ -255,6 +258,11 @@ async function initApp() {
   // itself). Only the most recent request is allowed to commit.
   let bootSeq = 0;
 
+  // Bounded LRU of loaded city bundles (2 entries -- see data.js's
+  // makeCityCache doc comment for why the bound is not optional). Created
+  // once, at module scope beside bootSeq, so it survives across switches.
+  const cityCache = makeCityCache(2);
+
   // The active city's region_bbox (cities.json), or AOIS.region as a last
   // resort when the registry failed to load (no cities.json / malformed —
   // same defensive posture as resolveSlug/loadCities). AOIS.region IS
@@ -272,13 +280,17 @@ async function initApp() {
     // mid-switch; this way the previous city stays rendered and the error is
     // reported into #status.
     let d;
+    showLoading(true);
     try {
-      d = await loadAll(dataDirFor(slug));
+      d = cityCache.get(slug) || await loadAll(dataDirFor(slug));
+      cityCache.set(slug, d);
     } catch (err) {
       // Only the newest request owns the status line; a stale failure must not
       // overwrite a newer city's message.
       if (statusEl && mySeq === bootSeq) statusEl.textContent = `Could not load ${slug}: ${err.message}`;
       return false; // previous city stays rendered
+    } finally {
+      showLoading(false);
     }
     // A newer boot() started while this one was fetching — abandon this result
     // rather than tearing down the city the user actually asked for last.
@@ -935,10 +947,64 @@ async function initApp() {
   }, { signal: abort.signal });
   stepExploreEl.addEventListener("click", endStory, { signal: abort.signal });
 
-  // Per-mode scratch buffers, reused across frames to avoid GC churn.
-  const modeSegs = [[], [], [], [], []];
-  const modeDelays = [[], [], [], [], []];
-  const modeAges = [[], [], [], [], []];
+  // Per-mode scratch buffers -- PRE-SIZED Float32Arrays plus explicit write
+  // indices, NOT plain JS arrays.
+  //
+  // These were `[[], [], ...]` and flushStamps did Float32Array.from() on each
+  // one, so the "reused across frames" claim was defeated: up to 15 fresh
+  // typed arrays were allocated and copied EVERY frame. Now the arrays are
+  // allocated once and only the write index resets. Capacity grows on demand
+  // (doubling) and never shrinks, so it self-tunes to the worst-case city and
+  // is allocation-free in steady state.
+  //
+  // modeCount[m] counts VERTICES (2 per edge), matching what field.stamp()
+  // needs for gl.drawArrays. segs holds 2 floats per vertex; delays/ages hold
+  // 1 float per vertex.
+  const MODE_N = 5;
+  const segCap = 4096; // initial capacity, vertices
+  const modeSegs = Array.from({ length: MODE_N }, () => new Float32Array(segCap * 2));
+  const modeDelays = Array.from({ length: MODE_N }, () => new Float32Array(segCap));
+  const modeAges = Array.from({ length: MODE_N }, () => new Float32Array(segCap));
+  const modeCount = new Uint32Array(MODE_N); // vertices written this pass
+
+  // Grow mode m's buffers to hold at least `needVerts` vertices, preserving
+  // what is already written (a frame can outgrow capacity mid-pass).
+  function ensureModeCap(m, needVerts) {
+    if (needVerts <= modeDelays[m].length) return;
+    let cap = modeDelays[m].length;
+    while (cap < needVerts) cap *= 2;
+    const s = new Float32Array(cap * 2); s.set(modeSegs[m]); modeSegs[m] = s;
+    const d = new Float32Array(cap); d.set(modeDelays[m]); modeDelays[m] = d;
+    const a = new Float32Array(cap); a.set(modeAges[m]); modeAges[m] = a;
+  }
+
+  // Reset all write indices. Replaces the three `for (const arr of ...)
+  // arr.length = 0` loops -- the buffers are retained, only the cursor moves.
+  function resetModeScratch() {
+    modeCount.fill(0);
+  }
+
+  // Cull bbox for the ripple path, recomputed once per frame (NOT per edge).
+  // null means "cull disabled" -- see updateCullBbox.
+  let cullBbox = null;
+
+  // Recompute the inflated cull bbox for this frame.
+  //
+  // DISABLED (null) whenever introProj is active: state.proj is then a
+  // TOP-CROPPED projection over a different bbox (see introProj assignment
+  // above), while visibleBbox() reads the free camera. Culling one against
+  // the other would wrongly drop visible intro edges. The intro is a
+  // bounded, paused snapshot, so culling buys nothing there anyway.
+  function updateCullBbox() {
+    if (introProj !== null) { cullBbox = null; return; }
+    const bb = viewBbox();
+    // Band half-width in CSS px -> world units, via the camera's own scale.
+    // thickness is the full band width in px; kx corrects lon for latitude.
+    const halfPx = RIPPLE_PARAMS.thickness;
+    const padY = halfPx / camera.scale;
+    const padX = padY / camera.kx;
+    cullBbox = inflateBbox(bb, padX, padY);
+  }
 
   // Resolve one edge (stamp-slice entry k, belonging to `stop`) into a
   // projected line segment + its baked delay + the event's current age,
@@ -964,13 +1030,38 @@ async function initApp() {
     const base = 4 * edgeIdx;
     const ax = segArr[base], ay = segArr[base + 1];
     const bx = segArr[base + 2], by = segArr[base + 3];
-    const proj = state.proj;
-    const [pax, pay] = proj.fn(ax, ay);
-    const [pbx, pby] = proj.fn(bx, by);
+
+    // Viewport cull (W2b). Test the UNPROJECTED endpoints: cheaper than
+    // projecting first, and it skips the buffer writes entirely. Conservative
+    // -- rejects only when the edge's own bbox lies wholly outside the
+    // inflated view, so a kept-but-invisible edge is possible (correct, just
+    // slower) while a culled-but-visible edge is not.
+    if (cullBbox !== null) {
+      const [cw, cs, ce, cn] = cullBbox;
+      if ((ax < cw && bx < cw) || (ax > ce && bx > ce) ||
+          (ay < cs && by < cs) || (ay > cn && by > cn)) return;
+    }
+
+    const n = modeCount[mode];
+    ensureModeCap(mode, n + 2);            // 2 vertices per edge
+    // state.proj is introProj (top-cropped) during the guided intro, else the
+    // free camera -- project through whichever is live, exactly as before.
+    const cam = state.proj.cam;
+    if (cam) {
+      projectInto(cam, ax, ay, modeSegs[mode], n * 2);
+      projectInto(cam, bx, by, modeSegs[mode], n * 2 + 2);
+    } else {
+      // introProj has no `cam` -- fall back to the allocating path. The intro
+      // is a paused, bounded snapshot, so its allocation cost is irrelevant.
+      const [pax, pay] = state.proj.fn(ax, ay);
+      const [pbx, pby] = state.proj.fn(bx, by);
+      modeSegs[mode][n * 2] = pax; modeSegs[mode][n * 2 + 1] = pay;
+      modeSegs[mode][n * 2 + 2] = pbx; modeSegs[mode][n * 2 + 3] = pby;
+    }
     const delay = stampDelay[k];
-    modeSegs[mode].push(pax, pay, pbx, pby);
-    modeDelays[mode].push(delay, delay);
-    modeAges[mode].push(age, age);
+    modeDelays[mode][n] = delay; modeDelays[mode][n + 1] = delay;
+    modeAges[mode][n] = age;     modeAges[mode][n + 1] = age;
+    modeCount[mode] = n + 2;
   }
 
   // Resolve a stop's city street-buffer + mode. Returns null if this stop
@@ -1013,15 +1104,13 @@ async function initApp() {
   // grouped by mode (one draw call per mode, additive blend). Shared by
   // the rAF loop and the scripted intro (seedStopRipple).
   function flushStamps(params = RIPPLE_PARAMS) {
-    for (let m = 0; m < modeSegs.length; m++) {
-      if (modeSegs[m].length === 0) continue;
-      field.stamp(
-        Float32Array.from(modeSegs[m]),
-        Float32Array.from(modeDelays[m]),
-        Float32Array.from(modeAges[m]),
-        MODE_COLORS[m],
-        params
-      );
+    for (let m = 0; m < MODE_N; m++) {
+      const n = modeCount[m];
+      if (n === 0) continue;
+      // Pass the buffers whole plus an explicit vertex count -- no
+      // Float32Array.from() copy, no subarray() allocation. field.stamp
+      // uploads only the first n vertices via bufferSubData.
+      field.stamp(modeSegs[m], modeDelays[m], modeAges[m], MODE_COLORS[m], params, n);
     }
   }
 
@@ -1043,9 +1132,7 @@ async function initApp() {
   // propagating wavefront.
   function seedStopRipple(stopIndices) {
     const stops = Array.isArray(stopIndices) ? stopIndices : [stopIndices];
-    for (const arr of modeSegs) arr.length = 0;
-    for (const arr of modeDelays) arr.length = 0;
-    for (const arr of modeAges) arr.length = 0;
+    resetModeScratch();
     for (const stop of stops) stampEventAllAtOnce(stop);
     flushStamps(INTRO_PARAMS);
     // Also persist the resolved buffers so the rAF loop's per-frame
@@ -1215,9 +1302,7 @@ async function initApp() {
     // activation are gated on dtSim > 0 below.
     field.clearField();
 
-    for (const arr of modeSegs) arr.length = 0;
-    for (const arr of modeDelays) arr.length = 0;
-    for (const arr of modeAges) arr.length = 0;
+    resetModeScratch();
 
     if (dtSim > 0) {
       // Activate newly-fired events (same forward-only sweep + stride
@@ -1246,12 +1331,11 @@ async function initApp() {
     // its own params (RIPPLE_PARAMS for live, INTRO_PARAMS — life decay off —
     // for the paused snapshot): a single shared flush would force one lifeTau
     // on both, either blinking the live ripples or freezing the intro's decay.
+    updateCullBbox();
     restampActiveEvents();
     flushStamps(state.speed === 1 ? RIPPLE_PARAMS_1X : RIPPLE_PARAMS); // live events
 
-    for (const arr of modeSegs) arr.length = 0;
-    for (const arr of modeDelays) arr.length = 0;
-    for (const arr of modeAges) arr.length = 0;
+    resetModeScratch();
 
     restampSeededStops();
     flushStamps(INTRO_PARAMS);          // intro snapshot, life decay off

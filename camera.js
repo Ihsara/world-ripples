@@ -45,7 +45,21 @@ export function createCamera(regionBbox, w, h, margin = 24) {
 
 export function cameraProjection(cam) {
   const { cx, cy, kx, scale: s, w, h } = cam;
-  return { s, kx, fn: (x, y) => [w / 2 + (x - cx) * kx * s, h / 2 - (y - cy) * s] };
+  return { s, kx, cam, fn: (x, y) => [w / 2 + (x - cx) * kx * s, h / 2 - (y - cy) * s] };
+}
+
+// Non-allocating sibling of cameraProjection().fn, for the per-frame hot path.
+//
+// cameraProjection returns `fn: (x, y) => [px, py]`, which allocates a fresh
+// 2-element array on EVERY call. pushEdge calls it twice per edge per frame,
+// and NYC averages 107 edges per stop -- that is the Chrome minor-GC storm.
+// This writes into a caller-supplied buffer instead. The arithmetic is
+// character-for-character the same as fn's, so results are identical
+// (pinned by web/tests/render-scratch.test.mjs).
+export function projectInto(cam, x, y, out, i) {
+  const { cx, cy, kx, scale: s, w, h } = cam;
+  out[i] = w / 2 + (x - cx) * kx * s;
+  out[i + 1] = h / 2 - (y - cy) * s;
 }
 
 export function unproject(cam, px, py) {
@@ -80,6 +94,20 @@ export function visibleBbox(cam) {
   const [wLon, sLat] = unproject(cam, 0, cam.h);
   const [eLon, nLat] = unproject(cam, cam.w, 0);
   return [wLon, sLat, eLon, nLat];
+}
+
+// Grow a [w, s, e, n] bbox by a world-unit pad on each axis. Returns a NEW
+// array; never mutates the input.
+//
+// Used by the ripple cull: the band drawn around an edge has on-screen WIDTH,
+// so an edge whose endpoints are both just off-screen can still bleed visible
+// pixels inward. Culling against the raw viewport pops those edges at the
+// margins; culling against an inflated one does not.
+export function inflateBbox(bbox, padWorldX, padWorldY) {
+  return [
+    bbox[0] - padWorldX, bbox[1] - padWorldY,
+    bbox[2] + padWorldX, bbox[3] + padWorldY,
+  ];
 }
 
 // ---- fly-to: easeInOutCubic over (cx, cy, scale) --------------------------

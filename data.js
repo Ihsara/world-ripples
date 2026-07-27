@@ -19,6 +19,33 @@ export async function loadBin(dir, name, dtype) {
   const buf = await r.arrayBuffer();
   return new CTOR[dtype](buf);
 }
+// Bounded LRU cache of loaded city bundles, so switching back to a city you
+// just viewed is instant instead of a full re-download and re-parse.
+//
+// BOUNDED ON PURPOSE. Each bundle is ~4-24 MB of typed arrays; an unbounded
+// cache would re-create exactly the leak the teardown work fixed (the panel's
+// AbortController was pinning a "~20 MB data bundle" via detached row
+// handlers -- app.js:609-612). Two entries covers the common A-to-B-and-back
+// switch without letting seven cities pile up.
+export function makeCityCache(limit) {
+  const m = new Map(); // Map preserves insertion order -> cheap LRU
+  return {
+    has: (slug) => m.has(slug),
+    size: () => m.size,
+    get(slug) {
+      if (!m.has(slug)) return undefined;
+      const v = m.get(slug);
+      m.delete(slug); m.set(slug, v);   // refresh recency
+      return v;
+    },
+    set(slug, bundle) {
+      if (m.has(slug)) m.delete(slug);  // replace, don't duplicate
+      m.set(slug, bundle);
+      while (m.size > limit) m.delete(m.keys().next().value); // evict LRU
+    },
+  };
+}
+
 export async function loadAll(dir) {
   const manifest = await loadManifest(dir);
   const [stops, stopMode, stopCity, stampEdge, stampDelay, stampIntensity,
@@ -29,10 +56,14 @@ export async function loadAll(dir) {
     loadBin(dir, "stamp_index", "u32"), loadBin(dir, "event_stop", "u32"),
     loadBin(dir, "event_time", "u32"),
   ]);
+  // Parallel, not sequential: this was an `await` inside a `for`, so Helsinki's
+  // four street bins cost four serial round-trips for no reason.
   const streets = {};
-  for (const city of Object.keys(manifest.cities)) {
-    streets[city] = await loadBin(dir, `street_${city}_seg`, "f32");
-  }
+  const cityNames = Object.keys(manifest.cities);
+  const streetBins = await Promise.all(
+    cityNames.map((city) => loadBin(dir, `street_${city}_seg`, "f32"))
+  );
+  cityNames.forEach((city, i) => { streets[city] = streetBins[i]; });
   // Vehicle bins (Task 9, Option A: sim-in-JS interpolation, no baked
   // per-frame table). Guarded: an older bake without vehicle bins must
   // still run the app (ripples-only, no moving dots).

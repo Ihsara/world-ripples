@@ -172,6 +172,7 @@ export class RippleField {
     this.segBuf = gl.createBuffer(); this.intBuf = gl.createBuffer();
     this.delayBuf = gl.createBuffer(); this.ageBuf = gl.createBuffer();
     this.ptBuf = gl.createBuffer(); this.ptColBuf = gl.createBuffer();
+    this._segCap = 0; this._delayCap = 0; this._ageCap = 0;
 
     // Task 12 perf gate: cache all uniform/attribute locations ONCE per
     // program right after linking, instead of calling getUniformLocation /
@@ -248,8 +249,13 @@ export class RippleField {
     gl.uniform1f(loc.k, k);
     this._drawQuad(this.decayP, this.quadLoc.decay); this.cur = dst;
   }
-  stamp(segVertices, delays, ages, color, params) {
+  stamp(segVertices, delays, ages, color, params, vertexCount) {
     const gl = this.gl, loc = this.stampLoc;
+    // Callers may pass pre-sized scratch buffers with only the first
+    // `vertexCount` vertices valid. Older callers pass exact-sized arrays and
+    // omit the count.
+    const n = vertexCount === undefined ? segVertices.length / 2 : vertexCount;
+    if (n === 0) return;
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo[this.cur]); gl.viewport(0, 0, this.w, this.h);
     gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
     gl.useProgram(this.stampP);
@@ -261,16 +267,29 @@ export class RippleField {
     gl.uniform1f(loc.wakeTau, params.wakeTau);
     gl.uniform1f(loc.wakeLevel, params.wakeLevel);
     gl.uniform1f(loc.lifeTau, params.lifeTau);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.segBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, segVertices, gl.DYNAMIC_DRAW);
-    gl.enableVertexAttribArray(loc.p); gl.vertexAttribPointer(loc.p, 2, gl.FLOAT, false, 0, 0);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.delayBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, delays, gl.DYNAMIC_DRAW);
-    gl.enableVertexAttribArray(loc.delay); gl.vertexAttribPointer(loc.delay, 1, gl.FLOAT, false, 0, 0);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.ageBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, ages, gl.DYNAMIC_DRAW);
-    gl.enableVertexAttribArray(loc.age); gl.vertexAttribPointer(loc.age, 1, gl.FLOAT, false, 0, 0);
-    gl.drawArrays(gl.LINES, 0, segVertices.length / 2);
+    this._upload(this.segBuf, segVertices, n * 2, loc.p, 2, "_segCap");
+    this._upload(this.delayBuf, delays, n, loc.delay, 1, "_delayCap");
+    this._upload(this.ageBuf, ages, n, loc.age, 1, "_ageCap");
+    gl.drawArrays(gl.LINES, 0, n);
+  }
+
+  // Upload the first `count` floats of `src` into `buf` without re-specifying
+  // the whole buffer every frame. gl.bufferData reallocates GPU storage on
+  // each call; bufferSubData writes into storage allocated once. The buffer is
+  // grown (never shrunk) when a frame needs more than it currently holds.
+  _upload(buf, src, count, attribLoc, size, capKey) {
+    const gl = this.gl;
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    const need = count * 4; // bytes (Float32)
+    if ((this[capKey] || 0) < need) {
+      let cap = Math.max(this[capKey] || 0, 4096);
+      while (cap < need) cap *= 2;
+      gl.bufferData(gl.ARRAY_BUFFER, cap, gl.DYNAMIC_DRAW);
+      this[capKey] = cap;
+    }
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, src, 0, count);
+    gl.enableVertexAttribArray(attribLoc);
+    gl.vertexAttribPointer(attribLoc, size, gl.FLOAT, false, 0, 0);
   }
   stampDots(pointsXY, colorsRGBA, sizePx) {
     const gl = this.gl, loc = this.pointLoc;
@@ -318,6 +337,7 @@ export class RippleField {
     }
     this.quad = this.segBuf = this.intBuf = this.delayBuf =
       this.ageBuf = this.ptBuf = this.ptColBuf = null;
+    this._segCap = 0; this._delayCap = 0; this._ageCap = 0;
     if (this.tex) for (const t of this.tex) gl.deleteTexture(t);
     if (this.fbo) for (const f of this.fbo) gl.deleteFramebuffer(f);
     this.tex = null; this.fbo = null;
