@@ -95,6 +95,31 @@
       ]
     },
     {
+      "slug": "milan",
+      "display_name": "Milan",
+      "coverage_note": "Milan's public transport: metro (M1-M5), trams and buses from ATM, plus Trenord suburban rail. The S-lines serving Milan are complete; Trenord's longer regional R/RE services are shown only where they run near the city. Walking ripples are drawn across the Milan urban area, so the most distant S-line stations appear as arrivals without a walk ripple. Data (c) Comune di Milano / AMAT - ATM (CC BY 3.0 IT) and (c) Trenord (CC BY 4.0).",
+      "region_bbox": [
+        8.4,
+        45.0,
+        9.9,
+        46.1
+      ],
+      "subareas": {
+        "Milan": [
+          8.95,
+          45.3,
+          9.5,
+          45.68
+        ]
+      },
+      "intro_bbox": [
+        8.95,
+        45.3,
+        9.5,
+        45.68
+      ]
+    },
+    {
       "slug": "nyc",
       "display_name": "New York City",
       "coverage_note": "MTA New York City Transit subway (regular schedule) and Staten Island Railway; Long Island Rail Road; Metro-North Railroad; NYCT local bus for all five boroughs (Bronx, Brooklyn, Manhattan, Queens, Staten Island); MTA Bus Company. Rail-outage shuttle buses (GTFS route_type 711) are folded into the bus mode alongside classic local buses; the Staten Island Railway (route_type 2, ships inside the subway feed) is shown as train, not metro. NOTE ON TIME WINDOW: the other cities animate a four-hour morning window (06:00-10:00); New York animates a shorter 90-minute morning-rush slice (06:00-07:30), anchored at the same 06:00 start, because the full federated nine-feed network exceeds the 25 MiB size budget over the longer window. No stops, routes, modes or feeds are dropped \u2014 every one of the nine MTA operators is fully represented; only the span of time SHOWN is shorter than the other cities'. Data: Metropolitan Transportation Authority, https://www.mta.info/developers.",
