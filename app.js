@@ -13,16 +13,16 @@
 // vehicle dots are interpolated in JS at playback (Option A) and impact dots
 // flash at a stop the instant its event fires.
 
-import { loadAll, makeCityCache } from "./data.js?v=d4dde99876";
+import { loadAll, makeCityCache } from "./data.js?v=d9ae549ff7";
 import { makeProjection, eventsInWindow, RippleField, realAge, clampSkip,
-         rippleLifeHorizon, nextEventInView, whisperText } from "./field.js?v=d4dde99876";
-import { vehiclePosition } from "./vehicles.js?v=d4dde99876";
+         rippleLifeHorizon, nextEventInView, whisperText } from "./field.js?v=d9ae549ff7";
+import { vehiclePosition } from "./vehicles.js?v=d9ae549ff7";
 import { createCamera, cameraProjection, panBy, zoomAboutPoint, resizeCamera,
          startFlyTo, stepFlyTo, visibleBbox, viewWidthKm, projectInto,
-         inflateBbox } from "./camera.js?v=d4dde99876";
-import { createPlacePanel } from "./panel.js?v=d4dde99876";
-import { findById, flattenTree } from "./places.js?v=d4dde99876";
-import { loadCities, resolveSlug } from "./cities.js?v=d4dde99876";
+         inflateBbox, fitBboxScale } from "./camera.js?v=d9ae549ff7";
+import { createPlacePanel } from "./panel.js?v=d9ae549ff7";
+import { findById, flattenTree } from "./places.js?v=d9ae549ff7";
+import { loadCities, resolveSlug } from "./cities.js?v=d9ae549ff7";
 
 // ---- AOI bboxes (lon/lat), mirrored from src/region.py EXACTLY -----------
 // Helsinki-specific subareas (fly-to chips + the guided intro's zoomed-in
@@ -769,6 +769,34 @@ async function initApp() {
   state.sePtr = lowerBound(eventTime, state.t);
   updateScrubberFromT();
   clockEl.textContent = formatClock(state.t);
+
+  // Headless frame capture hook. Kept behind an explicit query flag so the
+  // production app does not expose mutable internals.
+  if (new URLSearchParams(location.search).get("capture") === "1") {
+    window.__wrCamera = camera;
+    window.__wrCapture = {
+      fit(bbox) {
+        camera.cx = (bbox[0] + bbox[2]) / 2;
+        camera.cy = (bbox[1] + bbox[3]) / 2;
+        camera.scale = fitBboxScale(
+          bbox, camera.w, camera.h, camera.margin, camera.kx);
+        syncProjection();
+      },
+      seekClock(secondsSinceMidnight) {
+        state.t = Math.min(dataMax, Math.max(
+          dataMin, secondsSinceMidnight - manifest.sim_origin_sec));
+        state.sePtr = lowerBound(eventTime, state.t);
+        field.resize(canvas.width, canvas.height);
+        clearActiveEvents();
+        updateScrubberFromT();
+        clockEl.textContent = formatClock(state.t);
+        state.lastFrameTs = performance.now();
+      },
+      setSpeed(speed) {
+        applySpeed(speed);
+      },
+    };
+  }
 
   // v2.1 intro: ONE dismissible card, sim PLAYING behind it, remembered.
   // The 3-step guided tour still exists — now opt-in behind the ? button.

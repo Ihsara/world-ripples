@@ -120,6 +120,31 @@
       ]
     },
     {
+      "slug": "oslo",
+      "display_name": "Oslo",
+      "coverage_note": "Ruter's Oslo and Akershus GTFS feed, clipped to the Oslo metro area. T-bane, tram, bus and Oslofjord ferries. Data: Ruter, published via Entur (entur.org) under the Norwegian Licence for Open Government Data (NLOD).",
+      "region_bbox": [
+        10.5,
+        59.8,
+        11.0,
+        60.05
+      ],
+      "subareas": {
+        "Oslo": [
+          10.5,
+          59.8,
+          11.0,
+          60.05
+        ]
+      },
+      "intro_bbox": [
+        10.5,
+        59.8,
+        11.0,
+        60.05
+      ]
+    },
+    {
       "slug": "tokyo",
       "display_name": "Tokyo",
       "coverage_note": "Toei network (Bureau of Transportation, Tokyo Metropolitan Government): the Asakusa, Mita, Shinjuku and \u014cedo subway lines, the Tokyo Sakura Tram (Toden Arakawa Line), and the Nippori-Toneri Liner. Tokyo Metro and JR East (including the Yamanote Line) are NOT shown: their data licences prohibit public redistribution of a derived product, whereas Toei's feed is CC BY 4.0. Data: Bureau of Transportation, Tokyo Metropolitan Government, via the Public Transportation Open Data Center (odpt.org), CC BY 4.0.",
