@@ -220,6 +220,31 @@
       ]
     },
     {
+      "slug": "warsaw",
+      "display_name": "Warsaw",
+      "coverage_note": "Warsaw's ZTM public transport network: metro (M1, M2), trams, buses and SKM commuter rail. Data by Zarzad Transportu Miejskiego w Warszawie (ZTM), GTFS build by Mikolaj Kuranowski (mkuran.pl); bus route shapes from OpenStreetMap.",
+      "region_bbox": [
+        20.586,
+        51.922,
+        21.464,
+        52.494
+      ],
+      "subareas": {
+        "Warsaw": [
+          20.586,
+          51.922,
+          21.464,
+          52.494
+        ]
+      },
+      "intro_bbox": [
+        20.586,
+        51.922,
+        21.464,
+        52.494
+      ]
+    },
+    {
       "slug": "zurich",
       "display_name": "Z\u00fcrich",
       "coverage_note": "Swiss national GTFS timetable, clipped to the Z\u00fcrich metro area. S-Bahn, tram, bus and lake boats; funiculars and aerial cableways are shown as rail. Data: Open data platform mobility Switzerland (opentransportdata.swiss), published by SBB on behalf of the Swiss Federal Office of Transport.",
