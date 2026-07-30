@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Cities, breathing in light</title><link rel="stylesheet" href="app.css?v=d9ae549ff7"></head>
+<title>Cities, breathing in light</title><link rel="stylesheet" href="app.css?v=201eab07e7"></head>
 <body>
 <canvas id="map"></canvas>
 <canvas id="overlay"></canvas>
@@ -44,6 +44,14 @@
        ONE flex row inside the chrome column. On desktop the wrapper is
        display:contents, so the buttons keep their original position:fixed
        corner placement and the DOM change is invisible there. -->
+  <!-- Mode toggle (Life renderer). Ripples is the DEFAULT and is what a
+       first-time visitor lands on; Life is opt-in and, for now, only baked for
+       Helsinki — app.js hides this whole group for any other city rather than
+       offering a button that can only fail. -->
+  <div id="mode-toggle" role="group" aria-label="Visualization mode" hidden>
+    <button id="mode-ripples" type="button" class="active" aria-pressed="true">Ripples</button>
+    <button id="mode-life" type="button" aria-pressed="false">Life</button>
+  </div>
   <div id="utility">
     <button id="help-btn" type="button" title="How to read this" aria-label="How to read this">?</button>
     <button id="credits-btn" type="button" title="Data sources &amp; credits" aria-label="Data sources and credits">&#169;</button>
@@ -148,5 +156,5 @@
      part of the interface. -->
 <div id="status" hidden></div>
 <div id="loading" hidden>Loading…</div>
-<script type="module" src="app.js?v=d9ae549ff7"></script>
+<script type="module" src="app.js?v=201eab07e7"></script>
 </body></html>

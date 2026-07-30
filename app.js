@@ -13,16 +13,18 @@
 // vehicle dots are interpolated in JS at playback (Option A) and impact dots
 // flash at a stop the instant its event fires.
 
-import { loadAll, makeCityCache } from "./data.js?v=d9ae549ff7";
+import { loadAll, makeCityCache } from "./data.js?v=201eab07e7";
+import { loadLife } from "./life.js?v=201eab07e7";
+import { cellAlpha, precomputeDeaths } from "./lifeview.js?v=201eab07e7";
 import { makeProjection, eventsInWindow, RippleField, realAge, clampSkip,
-         rippleLifeHorizon, nextEventInView, whisperText } from "./field.js?v=d9ae549ff7";
-import { vehiclePosition } from "./vehicles.js?v=d9ae549ff7";
+         rippleLifeHorizon, nextEventInView, whisperText } from "./field.js?v=201eab07e7";
+import { vehiclePosition } from "./vehicles.js?v=201eab07e7";
 import { createCamera, cameraProjection, panBy, zoomAboutPoint, resizeCamera,
          startFlyTo, stepFlyTo, visibleBbox, viewWidthKm, projectInto,
-         inflateBbox, fitBboxScale } from "./camera.js?v=d9ae549ff7";
-import { createPlacePanel } from "./panel.js?v=d9ae549ff7";
-import { findById, flattenTree } from "./places.js?v=d9ae549ff7";
-import { loadCities, resolveSlug } from "./cities.js?v=d9ae549ff7";
+         inflateBbox, fitBboxScale } from "./camera.js?v=201eab07e7";
+import { createPlacePanel } from "./panel.js?v=201eab07e7";
+import { findById, flattenTree } from "./places.js?v=201eab07e7";
+import { loadCities, resolveSlug } from "./cities.js?v=201eab07e7";
 
 // ---- AOI bboxes (lon/lat), mirrored from src/region.py EXACTLY -----------
 // Helsinki-specific subareas (fly-to chips + the guided intro's zoomed-in
@@ -134,6 +136,152 @@ const MODE_CODE = (name) => ({ metro: 0, train: 1, tram: 2, bus: 3, ferry: 4 }[n
 const IMPACT_FADE_SIM_SEC = 8;
 const VEHICLE_DOT_BUDGET = 6000; // cap on stamped vehicle dots per frame (cost bound)
 
+// ---- Life mode playback (Task 4) -----------------------------------------
+// Life runs on its OWN clock: a generation index, not sim-time. It is NOT
+// mapped onto state.t, because the Life stream is one CA run seeded from a
+// single 15-minute departure window (life.json seed_clock_sec=18000) — there
+// is no generation that "is" 09:47, so pretending the wall clock indexes it
+// would be a lie dressed as a feature. What IS reused is every CONTROL: the
+// scrubber, play/pause, ±15m and the speed chips all drive lifePos below, so
+// Life adds no new widget beyond the mode toggle itself.
+//
+// LIFE_GENS_PER_SEC — generations per WALL-CLOCK second at the default 60x
+// speed chip. 6 gen/s runs the whole 201-frame stream in ~33 s, which is long
+// enough to watch and short enough to sit through. It is also what makes the
+// afterglow legible: lifeview's fade horizon is ~0.5 s of wall clock, so a
+// dying cell trails for ~3 generations and is GONE by the third — the horizon
+// is a visibility horizon, not a time constant (see lifeview.js). Much faster
+// (say 30 gen/s) and the afterglow collapses to a sub-frame flicker; much
+// slower and the population band — which barely changes generation to
+// generation — reads as a still.
+//
+// The ~3 generations is 0.5 s x this rate, so it scales with the speed chip
+// while the wall-clock duration stays fixed: 1.5 gens at 30x, 15 gens at 300x.
+// The FEEL of the fade is therefore identical at every chip, which is the
+// property that matters — see drawLifeFrame's playbackRate argument.
+const LIFE_GENS_PER_SEC = 6;
+// The speed ladder still means something in Life mode: rate scales with the
+// chip relative to the 60x default, so 1x is a slow-motion crawl (0.1 gen/s)
+// and 300x is a 5x-faster sweep. Same chips, same direction of travel.
+const LIFE_SPEED_REF = 60;
+// Generation 0 is the SEED: 66,815 live cells, which generation 1 culls to
+// 2,984. That 95% collapse in one step is the bake's true measured result and
+// is NOT tuned here (see the report). The only concession is a RENDERING one:
+// hold generation 0 on screen for this many wall-clock seconds before letting
+// the clock advance, so the seed is legible as a seed rather than a
+// single-frame flash the eye reads as a glitch. Holding a frame changes when
+// frames are shown, never what is in them.
+const LIFE_SEED_HOLD_SEC = 1.5;
+// Life stamps EVERY live/glowing cell, and generation 0 alone is 66,815 edges
+// (133,630 vertices). That is a one-off spike at the seed; the steady-state
+// band is ~1,600 cells. Pre-size the Life scratch to the seed so the very
+// first Life frame does not grow-and-copy its way up from 4096.
+const LIFE_SEG_CAP = 70000; // edges; vertices = 2x this
+// Life reuses the RIPPLE band shader rather than adding a GL program. The
+// shader computes b = (crest + wakeLevel*wake) * exp(-age/lifeTau) with
+// crest = max(1 - |T - age*frontSpeed| / thickness, 0). Feeding it
+// age = 1, frontSpeed = 1, thickness = 1, wakeLevel = 0, lifeTau = huge
+// collapses that to b = max(1 - |T - 1|, 0), so a per-vertex T of `alpha`
+// (0..1) renders as exactly `alpha`. Verified against field.js's own
+// bandBrightness() reference implementation: max error 1e-9 over alpha 0..1.
+// See pushLifeCell() for where the per-vertex alpha is written.
+const LIFE_PARAMS = { frontSpeed: 1, thickness: 1, wakeTau: 1, wakeLevel: 0, lifeTau: 1e9 };
+const LIFE_AGE = 1; // the `age` attribute every Life vertex carries (see above)
+// Life's one colour. Cyan (#6fd3e6) is the app's existing accent — the same
+// hue the district outline and the active picker chip use — so Life reads as
+// a mode of THIS app. Deliberately NOT one of the MODE_COLORS: a Life cell is
+// a street cell, not a metro/tram/bus event, and colouring it like one would
+// imply a mode attribution the data does not carry.
+const LIFE_COLOR = [0.435, 0.827, 0.902];
+// Life's stamps go through the SAME additive blend + tonemap as ripples, where
+// overlap brightening is the whole point (more ripples = brighter). For Life it
+// is noise: a cell is alive or dead, and one cell overlapping another must not
+// read as "more alive". At full alpha the pipeline
+// (alpha x STAMP_BRIGHTNESS=1.6, then 1-exp(-c*b*2.2)) clips a live cell to
+// pure white and throws the cyan away — measured on screen as (255,255,255).
+// Scaling alpha to 0.5625 puts a full-alpha cell at b=0.9, which tonemaps to
+// roughly (0.60, 0.83, 0.85): bright, unmistakably cyan, and with headroom left
+// so an overlap brightens instead of clipping.
+//
+// This is a RENDERING gain constant. It scales what a given alpha looks like,
+// never which cells are alive or what alpha the view model computed.
+const LIFE_STAMP_GAIN = 0.5625;
+
+// Map a scrubber fraction (0..1) onto a generation position, and back.
+// Exported for unit test: the round-trip is what makes scrub-then-play
+// resume from where the user dropped the handle instead of snapping.
+export function lifeFracToPos(frac, nFrames) {
+  const last = Math.max(0, nFrames - 1);
+  if (!Number.isFinite(frac)) return 0;
+  return Math.min(1, Math.max(0, frac)) * last; // clamp the FRACTION to 0..1
+}
+export function lifePosToFrac(pos, nFrames) {
+  const last = Math.max(0, nFrames - 1);
+  if (last === 0 || !Number.isFinite(pos)) return 0;
+  return Math.min(1, Math.max(0, pos / last));
+}
+// Advance the Life clock by `dGen` generations, wrapping at the end of the
+// stream. Returns { pos, wrapped }.
+//
+// STRICT `>`, deliberately, matching ripple playback's `tNext > dataMax` wrap
+// (frame() below). A `>=` here wraps AT the last generation, so free playback
+// would step 199 -> (>=200, wrap) -> 0 and NEVER SHOW gen 200 — the final
+// frame would be reachable only by scrubbing to 1.0 or skipping forward. That
+// is an off-by-one against the documented 201-frame mapping, and it silently
+// contradicts the endpoint behaviour ripple mode already has.
+//
+// The strict `>` alone is NOT sufficient, and the test caught it: the step is
+// `remaining * lifeGensPerSec()`, which never lands on an exact integer, so
+// stepping 199.0 by 0.1 reaches 199.9 and then 200.00000000000003 — a hair
+// PAST `last`, wrapping without gen 200 ever being displayed. So a step that
+// would overshoot CLAMPS to `last` first, and the wrap happens on the step
+// after that. Costs one extra frame at the end of a ~33 s loop; guarantees the
+// final generation is actually shown at any step size.
+//
+// Extracted from frame() so the boundary is unit-testable: the wrap decision
+// is exactly the kind of predicate that a browser-only code path hides.
+export function lifeAdvance(pos, dGen, nFrames) {
+  const last = Math.max(0, nFrames - 1);
+  const p = Number.isFinite(pos) ? pos : 0;
+  const d = Number.isFinite(dGen) ? dGen : 0;
+  const next = p + d;
+  if (next > last) {
+    // Already showing the final generation -> this step is the wrap.
+    if (p >= last) return { pos: 0, wrapped: true };
+    // Otherwise stop ON the final generation so it gets at least one frame.
+    return { pos: last, wrapped: false };
+  }
+  return { pos: Math.max(0, next), wrapped: false };
+}
+
+// Split a generation position into the integer generation + sub-generation
+// fraction cellAlpha() wants. Guards NaN/Infinity at the boundary: cellAlpha
+// throws a TypeError on a non-finite `gen`, and lifePos is computed from a
+// division that an empty/degenerate stream could make NaN.
+export function lifeSplit(pos, nFrames) {
+  const last = Math.max(0, nFrames - 1);
+  const p = Number.isFinite(pos) ? Math.min(last, Math.max(0, pos)) : 0;
+  const gen = Math.min(last, Math.floor(p));
+  const frac = Math.min(1, Math.max(0, p - gen));
+  return { gen, frac };
+}
+
+// Refcounted show/hide for the shared busy indicator. Two independent loads
+// can be in flight at once — boot()'s city bundle and setMode("life")'s Life
+// stream — and with a plain boolean the first to finish hides the spinner the
+// other still needs.
+//
+// Returns the next count. Clamped at 0 so an unbalanced release cannot drive
+// it negative and wedge the indicator OFF: with a naive `count - 1`, one extra
+// release would leave -1, and the next acquire would only bring it back to 0,
+// so "visible" would never be reached again.
+//
+// Exported purely so this rule is unit-testable; initApp() owns the actual
+// counter, since the element it drives is per-app-instance.
+export function nextLoadingCount(count, on) {
+  return on ? count + 1 : Math.max(0, count - 1);
+}
+
 function bboxObj(arr) {
   return { minX: arr[0], minY: arr[1], maxX: arr[2], maxY: arr[3] };
 }
@@ -163,7 +311,23 @@ async function initApp() {
     statusEl.hidden = false;
   }
   const loadingEl = document.getElementById("loading");
-  const showLoading = (on) => { if (loadingEl) loadingEl.hidden = !on; };
+  // REFCOUNTED, not a boolean. Two independent loads can be in flight at once:
+  // boot()'s city bundle and setMode("life")'s 0.87 MB Life stream. With a
+  // plain boolean the FIRST to finish hides the spinner the OTHER still needs
+  // — enter Life mode, click a city chip while the Life fetch is in flight,
+  // and the resolving Life load hides the new city's still-active spinner. The
+  // session-staleness guards protect app STATE correctly, but a superseded
+  // session must not touch the current one's UI on its way out either.
+  //
+  // Counting owners instead makes the release order irrelevant: the spinner is
+  // visible while at least one loader holds it, and every caller releases
+  // exactly what it acquired. Clamped at 0 so an unbalanced release can never
+  // drive the count negative and wedge the spinner on.
+  let loadingCount = 0;
+  const showLoading = (on) => {
+    loadingCount = nextLoadingCount(loadingCount, on);
+    if (loadingEl) loadingEl.hidden = loadingCount === 0;
+  };
   const clockEl = document.getElementById("clock");
   const whisperEl = document.getElementById("whisper");
   const scrubberEl = document.getElementById("scrubber");
@@ -179,6 +343,9 @@ async function initApp() {
   const stepCaptionEl = document.getElementById("step-caption");
   const stepNextEl = document.getElementById("step-next");
   const stepExploreEl = document.getElementById("step-explore");
+  const modeToggleEl = document.getElementById("mode-toggle");
+  const modeRipplesEl = document.getElementById("mode-ripples");
+  const modeLifeEl = document.getElementById("mode-life");
   const helpBtnEl = document.getElementById("help-btn");
   const creditsBtnEl = document.getElementById("credits-btn");
   const creditsEl = document.getElementById("credits");
@@ -243,6 +410,15 @@ async function initApp() {
     s.field = null;
     // 4. Release the baked bundle (~20 MB of typed arrays).
     s.data = null;
+    // 4.5. Release the Life stream (Task 2), if it was ever loaded. Life is
+    //    lazy (only fetched once Life mode is entered), so most sessions
+    //    have s.life === null here and this is a no-op — but a session that
+    //    DID enter Life mode is holding ~0.87 MB of decoded Uint8Array
+    //    frames (201 frames x 108,170 cells) that must not survive a city
+    //    switch, or repeated switches accumulate one stale frame set per
+    //    prior city (the same leak class step 4 guards against for `data`).
+    s.life = null;
+    s.lifePromise = null;
     // 5. Drop the panel handle. Its listeners died with step 2; this stops the
     //    session object itself from pointing at the detached row elements.
     s.panel = null;
@@ -301,7 +477,8 @@ async function initApp() {
     teardown();
 
     const abort = new AbortController();
-    const session = { rafHandle: null, abort, field: null, data: d, panel: null, idleTimer: null };
+    const session = { rafHandle: null, abort, field: null, data: d, panel: null, idleTimer: null,
+                       life: null, lifePromise: null };
     currentSession = session;
 
   const manifest = d.manifest;
@@ -369,6 +546,86 @@ async function initApp() {
     bpTime: d.vehicleTripBpTime, bpDist: d.vehicleTripBpDist,
   } : null;
 
+  // ---- Life mode: lazy load + decode (Task 2) ------------------------------
+  // Helsinki-only (per plan scope) — Life has been baked only for Helsinki
+  // (web/data/helsinki/life_Helsinki.bin). Life mode itself (the toggle, the
+  // view model, the renderer) doesn't exist yet — that's Tasks 3/4. This
+  // wires the LOADING half only: nothing calls loadLifeForSession() until a
+  // later task actually enters Life mode, so a ripple-only visitor never
+  // fetches the 0.87 MB stream. Memoized on the session (session.lifePromise)
+  // so repeated calls within one boot don't re-fetch, and teardown() (step
+  // 4.5) drops both session.life and session.lifePromise on city switch —
+  // the same "no resource survives a switch" contract data/field/panel get.
+  //
+  // cellCount is verified against TWO independent sources before anything is
+  // trusted: life.json's own manifest entry (life.cellCount, decoded from the
+  // .bin's header) and the geometry it's meant to render 1:1 onto
+  // (streets.Helsinki.length / 4 — the plan's "cell i -> seg[4i:4i+4]" fact).
+  // A mismatch here means the geometry assumption Task 4's renderer depends
+  // on has silently broken (e.g. a re-bake reordered/resized either side),
+  // so this throws rather than let a later task render garbage against a
+  // misaligned buffer.
+  function loadLifeForSession(citySlug) {
+    if (citySlug !== "helsinki") {
+      return Promise.reject(new Error(`life: no baked Life stream for city '${citySlug}' (Helsinki only)`));
+    }
+    if (session.lifePromise) return session.lifePromise; // in-flight or already resolved
+    session.lifePromise = (async () => {
+      const [life, lifeManifest] = await Promise.all([
+        loadLife(dataDirFor(citySlug), "Helsinki"),
+        fetch(`${dataDirFor(citySlug)}/life.json`).then((r) => {
+          if (!r.ok) throw new Error(`Failed to fetch life.json: ${r.status} ${r.statusText}`);
+          return r.json();
+        }),
+      ]);
+      const expected = lifeManifest.Helsinki && lifeManifest.Helsinki.cell_count;
+      const streetSeg = d.streets["Helsinki"];
+      const geomCells = streetSeg ? streetSeg.length / 4 : NaN;
+      if (life.cellCount !== expected) {
+        throw new Error(
+          `life: decoded cellCount ${life.cellCount} != life.json cell_count ${expected} ` +
+          "— the .bin and its manifest disagree; refusing to use a mismatched stream."
+        );
+      }
+      if (life.cellCount !== geomCells) {
+        throw new Error(
+          `life: decoded cellCount ${life.cellCount} != street_Helsinki_seg.bin/4 ${geomCells} ` +
+          "— the 1:1 cell<->edge geometry assumption is broken; refusing to render garbage."
+        );
+      }
+      session.life = life;
+      return life;
+    })();
+    // A rejected load must not poison future attempts (e.g. a transient
+    // fetch failure) — clear the memo so the next call retries instead of
+    // replaying the same rejection forever.
+    session.lifePromise.catch(() => { session.lifePromise = null; });
+    return session.lifePromise;
+  }
+  // Debug hooks (?debug=1 only), mirroring the window.__wrCapture pattern so
+  // production never exposes mutable internals.
+  //
+  // Task 4 replaced Task 2's pair of scaffolding hooks. __wrLifeDebug is GONE:
+  // it existed only because Task 2 had no UI trigger, and its one job —
+  // proving teardown() released the stream — is now covered by the same
+  // `state` object the renderer reads, reported through __wrLife below.
+  // __wrLoadLife SURVIVES but is repointed at the real entry path
+  // (setMode("life")), so a headless driver exercises exactly what the button
+  // does rather than a parallel loader that could drift from it.
+  if (new URLSearchParams(location.search).get("debug") === "1") {
+    window.__wrLoadLife = () => setMode("life");
+    // Read live off `session`/`state`, never a snapshot, so it reflects
+    // teardown() and the render loop the instant it is called.
+    window.__wrLife = () => ({
+      mode: state.mode,
+      hasLife: session.life !== null,
+      hasPromise: session.lifePromise !== null,
+      lifePos: state.lifePos,
+      liveCells: state.lifeLiveCells,
+      drawnCells: state.lifeDrawnCells,
+    });
+  }
+
   // Boot-time sanity check (T10 rollup / final-review item 7): the guided
   // intro hardcodes two baked stop indices (STORY_STOP_SOLO/PAIR). If a
   // future re-bake reorders stops, these could silently point at a stop
@@ -394,6 +651,17 @@ async function initApp() {
     sePtr: 0,
     proj: null,
     lastFrameTs: null,
+    // ---- Life mode (Task 4) ----
+    // "ripples" | "life". Ripples is the default and the ONLY mode a
+    // first-time visitor can land in — there is no ?mode= deep link, so the
+    // landing experience is byte-identical to before this task.
+    mode: "ripples",
+    lifePos: 0,        // float generation position, 0 .. nFrames-1
+    lifeHoldSec: 0,    // wall-sec still owed to the generation-0 hold
+    lifeLiveCells: 0,  // instrumentation only (#status + __wrLife)
+    lifeDrawnCells: 0, // cells actually stamped (alive + still glowing)
+    lifeDeaths: null,   // DeathIndex from precomputeDeaths(), built once on load
+    lifeDeathsFor: null, // the exact stream lifeDeaths was derived from (identity key)
   };
   // Deep-link params describe how the PAGE was opened, so they are applied
   // on the first boot only. Re-applying them on a city switch would yank the
@@ -437,8 +705,13 @@ async function initApp() {
     lastStatusTs = ts;
     const widthKm = viewWidthKm(camera);
     const widthText = widthKm < 10 ? widthKm.toFixed(1) : String(Math.round(widthKm));
+    const lifeStr = state.mode === "life"
+      ? " | life gen " + lifeSplit(state.lifePos,
+          session.life ? session.life.nFrames : 1).gen +
+        " live " + state.lifeLiveCells + " drawn " + state.lifeDrawnCells
+      : "";
     const str = "view " + widthText + " km | speed " + state.speed + "x" +
-      (state.paused ? " | paused" : "") +
+      (state.paused ? " | paused" : "") + lifeStr +
       " | " + Math.round(fpsValue) + " fps";
     if (str !== lastStatusStr) {
       lastStatusStr = str;
@@ -448,8 +721,11 @@ async function initApp() {
     // 1x whisper (spec §4): only at real time, only while playing; human
     // phrasing, never engine terms. delta is SIM seconds, which at 1x IS
     // real seconds.
+    // The whisper counts down to the next transit event, which has no meaning
+    // in Life mode — leave it blank there rather than narrating a clock the
+    // user is not looking at.
     let w = "";
-    if (state.speed === 1 && !state.paused) {
+    if (state.mode !== "life" && state.speed === 1 && !state.paused) {
       const nxt = nextEventInView(eventTime, eventStop, stops, state.sePtr, viewBbox());
       if (nxt) {
         const dsec = Math.max(0, Math.round(nxt.simSec - state.t));
@@ -697,7 +973,16 @@ async function initApp() {
     const mm = Math.floor((s % 3600) / 60);
     return String(hh).padStart(2, "0") + ":" + String(mm).padStart(2, "0");
   }
+  // The scrubber is SHARED: in ripple mode its fraction is a position in the
+  // sim-time window; in Life mode it is a position in the 201-generation
+  // stream. One widget, two axes, selected by state.mode — this is what lets
+  // Life ship with no new UI beyond the toggle.
   function updateScrubberFromT() {
+    if (state.mode === "life") {
+      const nFrames = session.life ? session.life.nFrames : 1;
+      scrubberEl.value = String(lifePosToFrac(state.lifePos, nFrames));
+      return;
+    }
     const frac = (state.t - dataMin) / dataSpan;
     scrubberEl.value = String(Math.min(1, Math.max(0, frac)));
   }
@@ -705,6 +990,18 @@ async function initApp() {
   // scrubber -> t (hard jump: clear the field, resync sePtr)
   scrubberEl.addEventListener("input", () => {
     const frac = parseFloat(scrubberEl.value);
+    if (state.mode === "life") {
+      // Life scrub: reposition the generation clock. No field clear is needed
+      // (Life re-stamps from scratch every frame from the frame data alone,
+      // carrying no in-flight state), but the seed hold is cancelled — a user
+      // who deliberately dragged the handle has asked to be somewhere, and
+      // holding them at generation 0 afterwards would fight the input.
+      const nFrames = session.life ? session.life.nFrames : 1;
+      state.lifePos = lifeFracToPos(frac, nFrames);
+      state.lifeHoldSec = 0;
+      clockEl.textContent = lifeClockText();
+      return;
+    }
     state.t = dataMin + frac * dataSpan;
     state.sePtr = lowerBound(eventTime, state.t);
     field.resize(canvas.width, canvas.height); // clears both textures
@@ -721,6 +1018,114 @@ async function initApp() {
   document.getElementById("speed-down")?.addEventListener("click",
     () => applySpeed(stepSpeed(state.speed, -1)), { signal: abort.signal });
 
+  // ---- Life mode: clock + mode switching (Task 4) --------------------------
+  // Generations per WALL-CLOCK second at the current speed chip. The chips
+  // keep their meaning (faster is faster) without letting 300x turn 201 frames
+  // into a 0.1 s strobe: the rate is anchored so the DEFAULT chip (60x) plays
+  // at LIFE_GENS_PER_SEC.
+  function lifeGensPerSec() {
+    const s = Number.isFinite(state.speed) && state.speed > 0 ? state.speed : LIFE_SPEED_REF;
+    return LIFE_GENS_PER_SEC * (s / LIFE_SPEED_REF);
+  }
+
+  // Clock readout while Life is active. The wall clock is meaningless here
+  // (Life is one CA run, not a timetable), so the slot says what it actually
+  // is — which generation you are looking at — rather than a time that would
+  // be a fiction. `Seed` names generation 0 for what it is.
+  function lifeClockText() {
+    const life = session.life;
+    if (!life) return "Life…";
+    const { gen } = lifeSplit(state.lifePos, life.nFrames);
+    return gen === 0 ? `Seed · gen 0 / ${life.nFrames - 1}` : `gen ${gen} / ${life.nFrames - 1}`;
+  }
+
+  function syncModeButtons() {
+    const isLife = state.mode === "life";
+    if (modeRipplesEl) {
+      modeRipplesEl.classList.toggle("active", !isLife);
+      modeRipplesEl.setAttribute("aria-pressed", String(!isLife));
+    }
+    if (modeLifeEl) {
+      modeLifeEl.classList.toggle("active", isLife);
+      modeLifeEl.setAttribute("aria-pressed", String(isLife));
+    }
+  }
+
+  // Enter/leave Life. Leaving is the important half: it must put ripple mode
+  // back exactly as it was, which means resyncing the sim cursor to state.t
+  // (it stopped advancing while Life owned the clock, so every event between
+  // sePtr and now is stale) and dropping any in-flight wavefronts, the same
+  // hard-jump idiom the scrubber and ±15m handlers use. Nothing about the
+  // ripple render path itself is touched, in either direction.
+  async function setMode(next) {
+    if (next === state.mode) return;
+    if (next === "life") {
+      state.mode = "life";
+      syncModeButtons();
+      // showLoading is REFCOUNTED, so acquire and release must be BALANCED:
+      // the spinner is only taken when this call will actually fetch, and the
+      // `finally` guarantees it is handed back exactly once on every exit path
+      // (success, throw, or an early return added later). An unbalanced pair
+      // here would leak a count and pin the spinner on forever.
+      const spinning = session.life === null;
+      if (spinning) showLoading(true);
+      let life;
+      try {
+        life = await loadLifeForSession(slug);
+      } catch (err) {
+        console.error("life: load failed", err);
+        if (statusEl) statusEl.textContent = `Life unavailable: ${err.message}`;
+        setMode("ripples"); // fall back to what definitely works
+        return;
+      } finally {
+        if (spinning) showLoading(false);
+      }
+      // A mode flip (or a city switch) while the fetch was in flight — do not
+      // clobber whatever the user asked for last. With the refcount above, a
+      // superseded session releasing its own spinner cannot hide the spinner
+      // the CURRENT session is still holding.
+      if (currentSession !== session || state.mode !== "life") return;
+      // precomputeDeaths is a ONE-TIME O(nFrames x cellCount) pass. Building it
+      // per frame would reintroduce exactly the cost lifeview.js's contract
+      // exists to prevent, so it is memoized. The memo is keyed on the STREAM
+      // OBJECT it was derived from, not just "is it null": a DeathIndex is only
+      // valid for the frames it was built from, and keying on identity means a
+      // different stream can never silently reuse the wrong index.
+      if (state.lifeDeaths === null || state.lifeDeathsFor !== life) {
+        state.lifeDeaths = precomputeDeaths(life);
+        state.lifeDeathsFor = life;
+      }
+      state.lifePos = 0;
+      state.lifeHoldSec = LIFE_SEED_HOLD_SEC;
+      // The field carries ripple light from the last ripple frame; clear it so
+      // Life does not open on a fading ghost of the other mode.
+      field.resize(canvas.width, canvas.height);
+      updateScrubberFromT();
+      clockEl.textContent = lifeClockText();
+    } else {
+      state.mode = "ripples";
+      syncModeButtons();
+      // Hand the ripple clock back cleanly: state.t never moved while Life was
+      // showing, but sePtr is where it was left, and any activeEvents are from
+      // before the detour. Same three lines skipBy()/the scrubber use.
+      state.sePtr = lowerBound(eventTime, state.t);
+      field.resize(canvas.width, canvas.height);
+      clearActiveEvents();
+      updateScrubberFromT();
+      clockEl.textContent = formatClock(state.t);
+    }
+  }
+
+  // Life is baked for Helsinki only (plan scope), so the toggle is HIDDEN
+  // rather than shown-and-broken for any other city. boot() runs per city, so
+  // this is re-evaluated on every switch.
+  if (modeToggleEl) {
+    modeToggleEl.hidden = slug !== "helsinki";
+  }
+  syncModeButtons();
+  modeRipplesEl?.addEventListener("click", () => { setMode("ripples"); }, { signal: abort.signal });
+  modeLifeEl?.addEventListener("click", () => { setMode("life"); }, { signal: abort.signal });
+
   function setPaused(p) {
     state.paused = p;
     playPauseEl.textContent = p ? "▶" : "⏸";
@@ -734,7 +1139,25 @@ async function initApp() {
 
   // ---- ±15min skip: identical hard-jump idiom to the scrubber handler
   // above (clear the field, resync sePtr, drop stale in-flight wavefronts).
+  // In Life mode the ±15m buttons step the GENERATION clock instead. 15 min of
+  // sim-time is 1/16 of the ripple window, so the Life step is the same
+  // proportion of the Life stream (~12 of 201 generations) — the buttons keep
+  // their felt meaning ("jump a chunk") without pretending a generation is a
+  // minute. Their labels stay "−15m/+15m"; retitling them per mode would mean
+  // new UI, which this task deliberately avoids (see the report).
+  const LIFE_SKIP_GENS = 12;
+
   function skipBy(deltaSec) {
+    if (state.mode === "life") {
+      const nFrames = session.life ? session.life.nFrames : 1;
+      const last = Math.max(0, nFrames - 1);
+      const step = Math.sign(deltaSec) * LIFE_SKIP_GENS;
+      state.lifePos = Math.min(last, Math.max(0, Math.round(state.lifePos) + step));
+      state.lifeHoldSec = 0;
+      updateScrubberFromT();
+      clockEl.textContent = lifeClockText();
+      return;
+    }
     state.t = clampSkip(state.t, deltaSec, dataMin, dataMax);
     state.sePtr = lowerBound(eventTime, state.t);
     field.resize(canvas.width, canvas.height); // clears both textures
@@ -840,6 +1263,10 @@ async function initApp() {
   helpBtnEl.addEventListener("click", () => {
     const wasPaused = state.paused;
     chromeEl.hidden = true;
+    // The guided tour teaches RIPPLES — it seeds stop isochrones, which the
+    // Life branch of frame() would never draw. Leave Life first so the tour
+    // shows what its captions describe instead of a blank field.
+    setMode("ripples");
     beginStory(); // 3-step tour; steps 1-2 pause (as designed, now opt-in)
     tourResumePaused = wasPaused;
   }, { signal: abort.signal });
@@ -1010,6 +1437,144 @@ async function initApp() {
   // arr.length = 0` loops -- the buffers are retained, only the cursor moves.
   function resetModeScratch() {
     modeCount.fill(0);
+  }
+
+  // ---- Life scratch buffers (Task 4) --------------------------------------
+  // Same shape and same discipline as the per-mode ripple scratch above:
+  // Float32Arrays allocated ONCE with an explicit write cursor, grown by
+  // doubling, never shrunk, never re-allocated per frame. Life needs only ONE
+  // set (it has no mode dimension — every cell is the same colour), so it is a
+  // flat trio rather than an array-of-5.
+  //
+  // Life is a SEPARATE buffer set rather than borrowing modeSegs[] because the
+  // two passes coexist in the frame ordering below: keeping them apart means
+  // the ripple path's buffers are never touched in Life mode, which is what
+  // makes "switch to Life and back" provably not corrupt ripple state.
+  let lifeSegs = new Float32Array(LIFE_SEG_CAP * 4);   // 2 verts * 2 floats per edge
+  let lifeAlphas = new Float32Array(LIFE_SEG_CAP * 2); // 1 float per vertex (the `delay` attr)
+  let lifeAges = new Float32Array(LIFE_SEG_CAP * 2);   // constant LIFE_AGE, uploaded as the `age` attr
+  lifeAges.fill(LIFE_AGE);
+  let lifeCount = 0; // vertices written this frame
+
+  function ensureLifeCap(needVerts) {
+    if (needVerts <= lifeAlphas.length) return;
+    let cap = lifeAlphas.length;
+    while (cap < needVerts) cap *= 2;
+    const s = new Float32Array(cap * 2); s.set(lifeSegs); lifeSegs = s;
+    const a = new Float32Array(cap); a.set(lifeAlphas); lifeAlphas = a;
+    // lifeAges is a constant field, so it is refilled wholesale rather than
+    // copied — every vertex carries the same LIFE_AGE.
+    lifeAges = new Float32Array(cap); lifeAges.fill(LIFE_AGE);
+  }
+
+  // Alpha below which a cell is not worth a draw call's worth of vertices.
+  //
+  // The threshold is on the RENDERED contribution, not the raw view-model
+  // alpha, so it must account for LIFE_STAMP_GAIN: a raw alpha of 1/255 leaves
+  // the shader at 1/255 * 0.5625, which the 8-bit present output rounds to
+  // zero — it would cost two vertices to draw nothing. Dividing the 1/255
+  // display floor by the gain puts the cut exactly where a cell stops being
+  // able to colour a pixel.
+  //
+  // HISTORICAL NOTE, kept because it explains why this constant is written the
+  // way it is. This epsilon is also the value lifeview.js sizes its afterglow
+  // decay against, and the two used to disagree: lifeview treated its 0.5 s
+  // "horizon" as the exponential TIME CONSTANT, so cells only reached this
+  // floor after ln(1/EPS) = 4.97 time constants = 2.48 s. Measured in the
+  // browser, that kept ~69,000 cells drawn for ~15 generations after they
+  // died, and made generation 1 render identically to the generation-0 seed
+  // (IoU 0.986). lifeview.js now divides by ln(1/EPS) so the horizon is a true
+  // visibility horizon; the two constants agree, and the tail is ~3
+  // generations at 6 gen/s as documented at LIFE_GENS_PER_SEC above.
+  //
+  // If LIFE_STAMP_GAIN changes, lifeview.js's RENDER_ALPHA_EPS must change with
+  // it — web/tests/lifeview.test.mjs pins both to the same value.
+  const LIFE_ALPHA_EPS = (1 / 255) / LIFE_STAMP_GAIN;
+
+  // Push one cell's street edge into the Life scratch. Cell i maps 1:1 onto
+  // street_Helsinki_seg.bin[4i .. 4i+4] — that identity is asserted at load
+  // time by loadLifeForSession (decoded cellCount vs seg.length/4), so no
+  // spatial join and no bounds check is needed here beyond the alpha gate.
+  //
+  // `alpha` rides in on the shader's `delay` attribute; see LIFE_PARAMS for
+  // why that renders as exactly `alpha`.
+  function pushLifeCell(segArr, i, alpha) {
+    const base = 4 * i;
+    const ax = segArr[base], ay = segArr[base + 1];
+    const bx = segArr[base + 2], by = segArr[base + 3];
+
+    // Same conservative viewport cull as pushEdge: reject only when the edge's
+    // own bbox lies wholly outside the inflated view.
+    if (cullBbox !== null) {
+      const [cw, cs, ce, cn] = cullBbox;
+      if ((ax < cw && bx < cw) || (ax > ce && bx > ce) ||
+          (ay < cs && by < cs) || (ay > cn && by > cn)) return;
+    }
+
+    const n = lifeCount;
+    ensureLifeCap(n + 2);
+    const cam = state.proj.cam;
+    if (cam) {
+      projectInto(cam, ax, ay, lifeSegs, n * 2);
+      projectInto(cam, bx, by, lifeSegs, n * 2 + 2);
+    } else {
+      const [pax, pay] = state.proj.fn(ax, ay);
+      const [pbx, pby] = state.proj.fn(bx, by);
+      lifeSegs[n * 2] = pax; lifeSegs[n * 2 + 1] = pay;
+      lifeSegs[n * 2 + 2] = pbx; lifeSegs[n * 2 + 3] = pby;
+    }
+    // The shader's `delay` attribute carries the GAIN-SCALED alpha (see
+    // LIFE_STAMP_GAIN). The caller's cull/epsilon test uses the raw alpha, so
+    // "is this cell worth drawing" stays a question about the view model and
+    // this stays purely about how bright the answer looks.
+    const a = alpha * LIFE_STAMP_GAIN;
+    lifeAlphas[n] = a; lifeAlphas[n + 1] = a;
+    lifeCount = n + 2;
+  }
+
+  // Draw one Life frame. Reads the BORROWED Float32Array from cellAlpha and
+  // consumes it immediately inside this function — it is never stored on
+  // `state`, never returned, and never survives to the next call, which is the
+  // contract lifeview.js documents.
+  function drawLifeFrame() {
+    const life = session.life;
+    if (!life) return;
+    const segArr = streets["Helsinki"];
+    if (!segArr) return;
+
+    // lifeSplit() guards the non-finite gen that cellAlpha throws a TypeError
+    // on — lifePos comes out of a division, and an empty-duration edge case
+    // could otherwise hand it a NaN and kill the render loop.
+    const { gen, frac } = lifeSplit(state.lifePos, life.nFrames);
+    const alphas = cellAlpha(life, gen, frac, {
+      // The Life clock advances at `lifeGensPerSec()` generations per WALL
+      // second, so telling cellAlpha playbackRate = that rate and speed = 1
+      // makes its afterglow horizon land on real wall-clock seconds. Passing
+      // state.speed here instead would double-count the speed chip, which is
+      // already folded into lifeGensPerSec().
+      playbackRate: lifeGensPerSec(),
+      speed: 1,
+      deathGen: state.lifeDeaths,
+    });
+
+    lifeCount = 0;
+    let drawn = 0;
+    let live = 0;
+    const n = life.cellCount;
+    const frame = life.frames[gen];
+    for (let i = 0; i < n; i++) {
+      if (frame[i] === 1) live++;
+      const a = alphas[i];
+      if (a < LIFE_ALPHA_EPS) continue;
+      pushLifeCell(segArr, i, a);
+      drawn++;
+    }
+    state.lifeDrawnCells = drawn;
+    state.lifeLiveCells = live;
+
+    if (lifeCount > 0) {
+      field.stamp(lifeSegs, lifeAlphas, lifeAges, LIFE_COLOR, LIFE_PARAMS, lifeCount);
+    }
   }
 
   // Cull bbox for the ripple path, recomputed once per frame (NOT per edge).
@@ -1304,6 +1869,59 @@ async function initApp() {
       const flying = stepFlyTo(flyAnim, camera, ts);
       if (!flying) flyAnim = null;
       syncProjection();
+    }
+
+    // ---- Life mode: replay baked generations ---------------------------------
+    // A COMPLETE, EARLY-RETURNING branch. It shares the loop's frame pacing,
+    // fly-to stepping and status readout, and nothing else: no event sweep, no
+    // vehicle dots, no impact dots, no touching of state.t/state.sePtr or the
+    // ripple scratch buffers. That containment is what makes "switch back to
+    // ripples" a no-op for ripple state rather than an unwind.
+    //
+    // THE BROWSER NEVER RUNS A GENERATION. state.lifePos only indexes frames
+    // the bake already produced; there is no rule, no neighbour count, and no
+    // stepping anywhere in this path.
+    if (state.mode === "life") {
+      const life = session.life;
+      if (life && !state.paused && dtRealMs > 0) {
+        const dtSec = dtRealMs / 1000;
+        // The generation-0 hold. This is a PRESENTATION choice and nothing
+        // else: the seed frame has 66,815 live cells and generation 1 has
+        // 2,984, so at 6 gen/s the seed would exist for 167 ms — below the
+        // threshold at which a viewer can tell "a dense seed collapsed" from
+        // "the page glitched". Holding gen 0 for LIFE_SEED_HOLD_SEC shows the
+        // seed as a seed, then lets the collapse happen at full speed and in
+        // full view. No frame is altered, skipped, blended or re-ordered; only
+        // the dwell time on frame 0 changes.
+        let remaining = dtSec;
+        if (state.lifeHoldSec > 0 && state.lifePos < 1) {
+          const used = Math.min(state.lifeHoldSec, remaining);
+          state.lifeHoldSec -= used;
+          remaining -= used;
+        }
+        if (remaining > 0) {
+          // Loop the stream, matching what ripple playback does at dataMax
+          // (STRICT `>`, so the final generation is actually displayed — see
+          // lifeAdvance). Re-arm the seed hold so a second pass is as legible
+          // as the first. lifeAdvance also absorbs a non-finite position or
+          // step, which is what keeps a NaN out of cellAlpha's finite-gen
+          // contract.
+          const adv = lifeAdvance(state.lifePos, remaining * lifeGensPerSec(), life.nFrames);
+          state.lifePos = adv.pos;
+          if (adv.wrapped) state.lifeHoldSec = LIFE_SEED_HOLD_SEC;
+        }
+      }
+
+      field.clearField();
+      updateCullBbox();
+      drawLifeFrame();
+      field.present();
+
+      clockEl.textContent = lifeClockText();
+      if (!state.paused) updateScrubberFromT();
+      maybeUpdateStatus(ts);
+      session.rafHandle = requestAnimationFrame(frame);
+      return;
     }
 
     const dtSim = (dtRealMs * state.speed) / 1000;

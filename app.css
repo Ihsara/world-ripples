@@ -89,6 +89,27 @@ body { font: 15px/1.45 system-ui, sans-serif; color: #e8e8ec; background: #10142
 #transport { justify-content: center; }
 #speed-readout { min-width: 3.2em; text-align: center; color: #fff;
   font-variant-numeric: tabular-nums; font-size: 13px; }
+
+/* ---------- mode toggle: Ripples | Life ----------
+   Same pill language as #city-picker/#aoi-picker (identical padding, border,
+   radius and the cyan .active fill), so it reads as part of the existing bar
+   rather than a bolted-on control. Ripples carries .active on load. */
+#mode-toggle { display: flex; justify-content: center; gap: 6px; }
+#mode-toggle button {
+  padding: 4px 14px; border: 1px solid #2a313d; background: rgba(16,20,32,.82);
+  color: #c7ccd6; border-radius: 999px; cursor: pointer; font: inherit;
+  font-size: 12px; transition: all .15s;
+}
+#mode-toggle button.active {
+  background: #6fd3e6; color: #061014; border-color: #6fd3e6; font-weight: 600;
+}
+#mode-toggle button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+/* Same [hidden] specificity trap the overlays hit: the ID rule above would
+   otherwise beat the UA stylesheet's display:none. */
+#mode-toggle[hidden] { display: none !important; }
+/* Generation readout replaces the clock's slot while Life is active; it is
+   plain text in #clock, so it inherits the tabular-nums treatment already
+   there and needs no extra rule. */
 #clock, #whisper { text-align: center; }
 
 /* Idle-hide: in fullscreen the chrome gets out of the way and returns on move. */
@@ -249,8 +270,8 @@ body.chrome-hidden #district-panel { opacity: 0; pointer-events: none;
      ever behaves as a box.) */
   #utility {
     display: flex; justify-content: center; align-items: center; gap: 14px;
-    order: 5;                /* last in #chrome's column: clock, whisper,
-                                scrubber, transport, then this row */
+    order: 6;                /* last in #chrome's column: clock, whisper,
+                                scrubber, transport, mode toggle, then this row */
     margin-top: 2px;
   }
   #help-btn, #credits-btn, #fullscreen-btn {
@@ -263,6 +284,12 @@ body.chrome-hidden #district-panel { opacity: 0; pointer-events: none;
 
   #transport { order: 4; flex-wrap: wrap; gap: 5px; }
   #transport button, #play-pause { padding: 6px 9px; font-size: 12px; }
+
+  /* #mode-toggle sits between transport and the utility row in DOM order, but
+     both of those carry explicit `order` here — without one of its own the
+     toggle (order:0) would jump above the clock. `order` must be an INTEGER,
+     so the toggle takes 5 and the utility row is pushed to 6. */
+  #mode-toggle { order: 5; }
 
   /* The panel tab's 148px bottom margin was cleared for the OLD chrome height;
      the utility row adds ~40px, so lift it to keep the tab clear of the bar. */

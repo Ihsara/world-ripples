@@ -1,6 +1,6 @@
 // data.js — fetch baked binaries into typed arrays. Fetches are RELATIVE
 // (Pages-safe). dtype maps to the little-endian packing from src/packing.py.
-const CTOR = { f32: Float32Array, u32: Uint32Array, u16: Uint16Array, i32: Int32Array };
+const CTOR = { f32: Float32Array, u32: Uint32Array, u16: Uint16Array, i32: Int32Array, u8: Uint8Array };
 
 export async function loadManifest(dir) {
   const r = await fetch(`${dir}/manifest.json`);
