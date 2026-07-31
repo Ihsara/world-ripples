@@ -105,6 +105,57 @@ export function precomputeDeaths(frames) {
   return new DeathIndex(cellCount, offsets, gens);
 }
 
+/**
+ * Per-cell, per-generation "last-seen live mode" — the afterglow colour index.
+ *
+ * WHY THIS EXISTS: the wire format (`worldripples/lifepack.py` `pack_modes`)
+ * stores 2 mode bits per LIVE cell only, in that frame's popcount order. A
+ * dead cell's mode bits are never on the wire — `unpack_modes` / `decodeLife`
+ * prefill NO_MODE (255) for every dead index because there is nothing else
+ * they could do. So `life.modes[gen][i]` for a currently-dead cell is ALWAYS
+ * 255, regardless of what the Python bake's internal `modes` array held
+ * before `modes[~state] = NO_MODE` zeroed it at death — that assignment
+ * happens after `pack_modes` has already dropped dead-cell modes, so it does
+ * not change a single byte written to disk. Changing the bake cannot fix the
+ * afterglow colour; only the renderer, which sees every frame in order, can
+ * remember what a cell looked like the last time it was actually alive.
+ *
+ * This is a forward pass exactly like `precomputeDeaths`: for each cell, walk
+ * generations ascending, and whenever the cell is alive record its mode as
+ * the "last live mode so far". A cell that has never been alive at or before
+ * a given generation reports NO_MODE — it must not borrow slot 0 (metro) by
+ * virtue of a zero-initialized array.
+ *
+ * Layout mirrors DeathIndex's memory shape: one Uint8Array per generation,
+ * cellCount bytes each. This trades a bit more memory (1 byte x cellCount x
+ * nFrames, same order as the decoded mode frames themselves) for O(1)
+ * lookups with no per-frame scanning, which is the same allocation-light
+ * contract cellAlpha's deathGen requires.
+ */
+export function precomputeLastMode(frames) {
+  const { cellCount, nFrames, frames: frameList, modes: modeList } = frames;
+  if (!modeList) {
+    throw new Error("precomputeLastMode: frames.modes is required (decodeLife output)");
+  }
+
+  const lastMode = new Array(nFrames);
+  let running = new Uint8Array(cellCount).fill(255); // NO_MODE
+  for (let gen = 0; gen < nFrames; gen++) {
+    const state = frameList[gen];
+    const modeFrame = modeList[gen];
+    // Copy-on-write per generation so each slot is independently queryable
+    // (a later generation's update must not retroactively change an earlier
+    // generation's already-returned array).
+    const next = running.slice();
+    for (let i = 0; i < cellCount; i++) {
+      if (state[i] === 1) next[i] = modeFrame[i];
+    }
+    lastMode[gen] = next;
+    running = next;
+  }
+  return lastMode;
+}
+
 // Afterglow horizon: ~0.5 seconds of wall-clock time.
 //
 // This is a VISIBILITY horizon, not the exponential time constant. By

@@ -13,18 +13,18 @@
 // vehicle dots are interpolated in JS at playback (Option A) and impact dots
 // flash at a stop the instant its event fires.
 
-import { loadAll, makeCityCache } from "./data.js?v=4f348c8398";
-import { loadLife } from "./life.js?v=4f348c8398";
-import { cellAlpha, precomputeDeaths } from "./lifeview.js?v=4f348c8398";
+import { loadAll, makeCityCache } from "./data.js?v=5c81adcc78";
+import { loadLife } from "./life.js?v=5c81adcc78";
+import { cellAlpha, precomputeDeaths, precomputeLastMode } from "./lifeview.js?v=5c81adcc78";
 import { makeProjection, eventsInWindow, RippleField, realAge, clampSkip,
-         rippleLifeHorizon, nextEventInView, whisperText } from "./field.js?v=4f348c8398";
-import { vehiclePosition } from "./vehicles.js?v=4f348c8398";
+         rippleLifeHorizon, nextEventInView, whisperText } from "./field.js?v=5c81adcc78";
+import { vehiclePosition } from "./vehicles.js?v=5c81adcc78";
 import { createCamera, cameraProjection, panBy, zoomAboutPoint, resizeCamera,
          startFlyTo, stepFlyTo, visibleBbox, viewWidthKm, projectInto,
-         inflateBbox, fitBboxScale } from "./camera.js?v=4f348c8398";
-import { createPlacePanel } from "./panel.js?v=4f348c8398";
-import { findById, flattenTree } from "./places.js?v=4f348c8398";
-import { loadCities, resolveSlug } from "./cities.js?v=4f348c8398";
+         inflateBbox, fitBboxScale } from "./camera.js?v=5c81adcc78";
+import { createPlacePanel } from "./panel.js?v=5c81adcc78";
+import { findById, flattenTree } from "./places.js?v=5c81adcc78";
+import { loadCities, resolveSlug } from "./cities.js?v=5c81adcc78";
 
 // ---- AOI bboxes (lon/lat), mirrored from src/region.py EXACTLY -----------
 // Helsinki-specific subareas (fly-to chips + the guided intro's zoomed-in
@@ -51,7 +51,7 @@ const MODE_COLORS = [
   [0.698, 0.4, 1.0],     // 1 train   #b266ff
   [0.2, 0.8, 0.4],       // 2 tram    #33cc66
   [0.561, 0.722, 0.902], // 3 bus     #8fb8e6
-  [0.561, 0.722, 0.902], // 4 ferry   (reuse bus color; no ferry events expected)
+  [0.561, 0.722, 0.902], // 4 ferry (shares the bus colour -- see the spec's mode-slot table)
 ];
 
 // Phase B: the bundle root holds cities.json plus one directory per city
@@ -194,21 +194,36 @@ const LIFE_SEG_CAP = 120000; // edges; vertices = 2x this
 // See pushLifeCell() for where the per-vertex alpha is written.
 const LIFE_PARAMS = { frontSpeed: 1, thickness: 1, wakeTau: 1, wakeLevel: 0, lifeTau: 1e9 };
 const LIFE_AGE = 1; // the `age` attribute every Life vertex carries (see above)
-// Life's one colour. Cyan (#6fd3e6) is the app's existing accent — the same
-// hue the district outline and the active picker chip use — so Life reads as
-// a mode of THIS app. Deliberately NOT one of the MODE_COLORS: a Life cell is
-// a street cell, not a metro/tram/bus event, and colouring it like one would
-// imply a mode attribution the data does not carry.
-const LIFE_COLOR = [0.435, 0.827, 0.902];
+// Life is coloured by MODE_COLORS, the same palette ripple mode uses, so a
+// viewer switching modes sees the same colour mean the same service.
+//
+// The comment this replaces argued against exactly that: "a Life cell is a
+// street cell, not a metro/tram/bus event, and colouring it like one would
+// imply a mode attribution the data does not carry". That objection is
+// answered rather than deleted, by making the claim precise. A cell's colour
+// says:
+//
+//   the highest-order service that reached this street during this
+//   generation's window -- or, for a cell the timetable did not reach, the
+//   service that reached the neighbours it was born from.
+//
+// That is a defensible statement about a street segment: not that the segment
+// IS a tram, but that a tram got there, and that where several services did,
+// the rarer one is the one worth naming. Multi-mode cells are 8-12% of stamped
+// cells (measured), so the rank rule decides a minority, not the board.
+//
+// See docs/superpowers/specs/2026-07-31-life-colour-by-mode-design.md.
+const LIFE_MODE_SLOTS = 4;
 // Life's stamps go through the SAME additive blend + tonemap as ripples, where
 // overlap brightening is the whole point (more ripples = brighter). For Life it
 // is noise: a cell is alive or dead, and one cell overlapping another must not
 // read as "more alive". At full alpha the pipeline
 // (alpha x STAMP_BRIGHTNESS=1.6, then 1-exp(-c*b*2.2)) clips a live cell to
-// pure white and throws the cyan away — measured on screen as (255,255,255).
-// Scaling alpha to 0.5625 puts a full-alpha cell at b=0.9, which tonemaps to
-// roughly (0.60, 0.83, 0.85): bright, unmistakably cyan, and with headroom left
-// so an overlap brightens instead of clipping.
+// pure white, crushing its MODE_COLORS hue to (255,255,255) and erasing which
+// service lit it. Scaling alpha to 0.5625 puts a full-alpha cell at b=0.9,
+// which tonemaps to roughly 60-85% of each channel: bright and clearly
+// tinted by its MODE_COLORS slot, with headroom left so an overlap brightens
+// instead of clipping.
 //
 // This is a RENDERING gain constant. It scales what a given alpha looks like,
 // never which cells are alive or what alpha the view model computed.
@@ -242,7 +257,7 @@ export function lifePosToFrac(pos, nFrames) {
 // stepping 199.0 by 0.1 reaches 199.9 and then 200.00000000000003 — a hair
 // PAST `last`, wrapping without gen 200 ever being displayed. So a step that
 // would overshoot CLAMPS to `last` first, and the wrap happens on the step
-// after that. Costs one extra frame at the end of a ~33 s loop; guarantees the
+// after that. Costs one extra frame at the end of a ~20 s loop; guarantees the
 // final generation is actually shown at any step size.
 //
 // Extracted from frame() so the boundary is unit-testable: the wrap decision
@@ -712,6 +727,8 @@ async function initApp() {
     lifeDrawnCells: 0, // cells actually stamped (alive + still glowing)
     lifeDeaths: new Map(),    // subarea name -> DeathIndex from precomputeDeaths()
     lifeDeathsFor: new Map(), // subarea name -> the exact stream its index came from
+    lifeModes: new Map(),     // subarea name -> per-gen last-live-mode arrays (precomputeLastMode)
+    lifeModesFor: new Map(),  // subarea name -> the exact stream its index came from
   };
   // Deep-link params describe how the PAGE was opened, so they are applied
   // on the first boot only. Re-applying them on a city switch would yank the
@@ -1156,6 +1173,15 @@ async function initApp() {
           state.lifeDeaths.set(name, precomputeDeaths(stream));
           state.lifeDeathsFor.set(name, stream);
         }
+        // precomputeLastMode is the afterglow-colour fix: the wire format
+        // never carries a dead cell's mode (pack_modes is sparse over LIVE
+        // cells only), so a fading cell's true colour has to be remembered
+        // by the renderer across generations, not read from that frame's
+        // mode section. Same memoization shape as lifeDeaths above.
+        if (state.lifeModesFor.get(name) !== stream) {
+          state.lifeModes.set(name, precomputeLastMode(stream));
+          state.lifeModesFor.set(name, stream);
+        }
       }
       state.lifePos = 0;
       state.lifeHoldSec = LIFE_SEED_HOLD_SEC;
@@ -1503,29 +1529,34 @@ async function initApp() {
   // ---- Life scratch buffers (Task 4) --------------------------------------
   // Same shape and same discipline as the per-mode ripple scratch above:
   // Float32Arrays allocated ONCE with an explicit write cursor, grown by
-  // doubling, never shrunk, never re-allocated per frame. Life needs only ONE
-  // set (it has no mode dimension — every cell is the same colour), so it is a
-  // flat trio rather than an array-of-5.
+  // doubling, never shrunk, never re-allocated per frame. Colour is a
+  // per-draw-call uniform (field.js's gl.uniform3fv), so per-mode colour
+  // needs one stamp() call per mode -- Life gets the SAME array-of-slots
+  // shape as the ripple path's modeSegs/modeDelays/modeAges above, indexed
+  // by LIFE_MODE_SLOTS rather than MODE_N.
   //
   // Life is a SEPARATE buffer set rather than borrowing modeSegs[] because the
   // two passes coexist in the frame ordering below: keeping them apart means
   // the ripple path's buffers are never touched in Life mode, which is what
   // makes "switch to Life and back" provably not corrupt ripple state.
-  let lifeSegs = new Float32Array(LIFE_SEG_CAP * 4);   // 2 verts * 2 floats per edge
-  let lifeAlphas = new Float32Array(LIFE_SEG_CAP * 2); // 1 float per vertex (the `delay` attr)
-  let lifeAges = new Float32Array(LIFE_SEG_CAP * 2);   // constant LIFE_AGE, uploaded as the `age` attr
-  lifeAges.fill(LIFE_AGE);
-  let lifeCount = 0; // vertices written this frame
+  const lifeSegs = Array.from({ length: LIFE_MODE_SLOTS }, () => new Float32Array(LIFE_SEG_CAP * 4));
+  const lifeAlphas = Array.from({ length: LIFE_MODE_SLOTS }, () => new Float32Array(LIFE_SEG_CAP * 2));
+  const lifeAges = Array.from({ length: LIFE_MODE_SLOTS }, () => {
+    const a = new Float32Array(LIFE_SEG_CAP * 2);
+    a.fill(LIFE_AGE);
+    return a;
+  });
+  const lifeCounts = new Uint32Array(LIFE_MODE_SLOTS); // vertices written this frame, per slot
 
-  function ensureLifeCap(needVerts) {
-    if (needVerts <= lifeAlphas.length) return;
-    let cap = lifeAlphas.length;
+  function ensureLifeCap(m, needVerts) {
+    if (needVerts <= lifeAlphas[m].length) return;
+    let cap = lifeAlphas[m].length;
     while (cap < needVerts) cap *= 2;
-    const s = new Float32Array(cap * 2); s.set(lifeSegs); lifeSegs = s;
-    const a = new Float32Array(cap); a.set(lifeAlphas); lifeAlphas = a;
-    // lifeAges is a constant field, so it is refilled wholesale rather than
+    const s = new Float32Array(cap * 2); s.set(lifeSegs[m]); lifeSegs[m] = s;
+    const a = new Float32Array(cap); a.set(lifeAlphas[m]); lifeAlphas[m] = a;
+    // lifeAges[m] is a constant field, so it is refilled wholesale rather than
     // copied — every vertex carries the same LIFE_AGE.
-    lifeAges = new Float32Array(cap); lifeAges.fill(LIFE_AGE);
+    lifeAges[m] = new Float32Array(cap); lifeAges[m].fill(LIFE_AGE);
   }
 
   // Alpha below which a cell is not worth a draw call's worth of vertices.
@@ -1559,7 +1590,11 @@ async function initApp() {
   //
   // `alpha` rides in on the shader's `delay` attribute; see LIFE_PARAMS for
   // why that renders as exactly `alpha`.
-  function pushLifeCell(segArr, i, alpha) {
+  //
+  // `slot` selects which of the LIFE_MODE_SLOTS buckets this cell's vertices
+  // land in -- exactly one bucket, never several, which is what keeps
+  // LIFE_STAMP_GAIN's no-blow-out property intact (see LIFE_MODE_SLOTS above).
+  function pushLifeCell(segArr, i, alpha, slot) {
     const base = 4 * i;
     const ax = segArr[base], ay = segArr[base + 1];
     const bx = segArr[base + 2], by = segArr[base + 3];
@@ -1572,25 +1607,25 @@ async function initApp() {
           (ay < cs && by < cs) || (ay > cn && by > cn)) return;
     }
 
-    const n = lifeCount;
-    ensureLifeCap(n + 2);
+    const n = lifeCounts[slot];
+    ensureLifeCap(slot, n + 2);
     const cam = state.proj.cam;
     if (cam) {
-      projectInto(cam, ax, ay, lifeSegs, n * 2);
-      projectInto(cam, bx, by, lifeSegs, n * 2 + 2);
+      projectInto(cam, ax, ay, lifeSegs[slot], n * 2);
+      projectInto(cam, bx, by, lifeSegs[slot], n * 2 + 2);
     } else {
       const [pax, pay] = state.proj.fn(ax, ay);
       const [pbx, pby] = state.proj.fn(bx, by);
-      lifeSegs[n * 2] = pax; lifeSegs[n * 2 + 1] = pay;
-      lifeSegs[n * 2 + 2] = pbx; lifeSegs[n * 2 + 3] = pby;
+      lifeSegs[slot][n * 2] = pax; lifeSegs[slot][n * 2 + 1] = pay;
+      lifeSegs[slot][n * 2 + 2] = pbx; lifeSegs[slot][n * 2 + 3] = pby;
     }
     // The shader's `delay` attribute carries the GAIN-SCALED alpha (see
     // LIFE_STAMP_GAIN). The caller's cull/epsilon test uses the raw alpha, so
     // "is this cell worth drawing" stays a question about the view model and
     // this stays purely about how bright the answer looks.
     const a = alpha * LIFE_STAMP_GAIN;
-    lifeAlphas[n] = a; lifeAlphas[n + 1] = a;
-    lifeCount = n + 2;
+    lifeAlphas[slot][n] = a; lifeAlphas[slot][n + 1] = a;
+    lifeCounts[slot] = n + 2;
   }
 
   // Draw one Life frame across EVERY subarea. Reads the BORROWED Float32Array
@@ -1608,7 +1643,7 @@ async function initApp() {
     const anyLife = streams.values().next().value;
     const { gen, frac } = lifeSplit(state.lifePos, anyLife.nFrames);
 
-    lifeCount = 0;
+    lifeCounts.fill(0);
     let drawn = 0;
     let live = 0;
 
@@ -1627,19 +1662,42 @@ async function initApp() {
       });
       const n = life.cellCount;
       const frame = life.frames[gen];
+      // modes[gen] is the SAME frame index just used for frame/alphas above --
+      // dense per-cell mode bytes for the generation actually being drawn, not
+      // a stale or boot-time snapshot (Task 4's decodeLife output). It is only
+      // meaningful for cells ALIVE this generation: the wire format never
+      // stores a dead cell's mode (pack_modes is sparse over live cells), so
+      // this array reads 255 for every currently-dead index.
+      const modeFrame = life.modes[gen];
+      // lastMode[gen] is the afterglow colour: each cell's most recently-seen
+      // LIVE mode at or before this generation (precomputeLastMode). A fading
+      // (just-died) cell reads its colour from here, not from modeFrame,
+      // which cannot carry it. A cell that has never been alive still reads
+      // NO_MODE from this array too, so it cannot borrow slot 0.
+      const lastModeFrame = state.lifeModes.get(name)[gen];
       for (let i = 0; i < n; i++) {
-        if (frame[i] === 1) live++;
+        const alive = frame[i] === 1;
+        if (alive) live++;
         const a = alphas[i];
         if (a < LIFE_ALPHA_EPS) continue;
-        pushLifeCell(segArr, i, a);
+        // Alive cells take this frame's own mode; dying/afterglow cells keep
+        // the mode of the service that last lit them. NO_MODE (255, a cell
+        // that has never been alive at or before this generation) falls back
+        // to slot 3 (bus/ferry) -- see the LIFE_MODE_SLOTS comment.
+        const mode = alive ? modeFrame[i] : lastModeFrame[i];
+        const slot = mode === 255 ? 3 : mode;
+        pushLifeCell(segArr, i, a, slot);
         drawn++;
       }
     }
     state.lifeDrawnCells = drawn;
     state.lifeLiveCells = live;
 
-    if (lifeCount > 0) {
-      field.stamp(lifeSegs, lifeAlphas, lifeAges, LIFE_COLOR, LIFE_PARAMS, lifeCount);
+    for (let m = 0; m < LIFE_MODE_SLOTS; m++) {
+      const n = lifeCounts[m];
+      if (n > 0) {
+        field.stamp(lifeSegs[m], lifeAlphas[m], lifeAges[m], MODE_COLORS[m], LIFE_PARAMS, n);
+      }
     }
   }
 

@@ -299,7 +299,8 @@
         3
       ]
     },
-    "bytes": 1636178
+    "mode_slots": 4,
+    "bytes": 2472330
   },
   "Espoo": {
     "cell_count": 79659,
@@ -597,7 +598,8 @@
         3
       ]
     },
-    "bytes": 1204934
+    "mode_slots": 4,
+    "bytes": 1351033
   },
   "Vantaa": {
     "cell_count": 42782,
@@ -895,7 +897,8 @@
         3
       ]
     },
-    "bytes": 647124
+    "mode_slots": 4,
+    "bytes": 782055
   },
   "Kauniainen": {
     "cell_count": 2221,
@@ -1193,6 +1196,7 @@
         3
       ]
     },
-    "bytes": 33654
+    "mode_slots": 4,
+    "bytes": 41695
   }
 }
