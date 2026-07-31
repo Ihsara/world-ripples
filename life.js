@@ -4,45 +4,34 @@
 // Format is produced by worldripples/lifepack.py and must agree byte-for-byte;
 // web/tests/life.test.mjs asserts that against a Python-generated fixture.
 const MAGIC = 0x464c5257; // "WRLF" read as little-endian u32
-const TAG_KEYFRAME = 0;
-const HEADER_BYTES = 20;
+const HEADER_BYTES = 16;
 
 export function decodeLife(arrayBuffer) {
   const dv = new DataView(arrayBuffer);
   if (dv.getUint32(0, true) !== MAGIC) throw new Error("life: bad magic");
   const version = dv.getUint32(4, true);
-  if (version !== 1) throw new Error(`life: unsupported version ${version}`);
+  if (version !== 2) throw new Error(`life: unsupported version ${version}`);
   const cellCount = dv.getUint32(8, true);
   const nFrames = dv.getUint32(12, true);
-  const keyframeInterval = dv.getUint32(16, true);
 
   const bytes = new Uint8Array(arrayBuffer);
   const stride = (cellCount + 7) >> 3;
+  const expectedLen = HEADER_BYTES + nFrames * stride;
+  if (bytes.length !== expectedLen) {
+    throw new Error(`life: truncated buffer: expected ${expectedLen} bytes, got ${bytes.length}`);
+  }
   let pos = HEADER_BYTES;
 
   const frames = [];
-  let state = new Uint8Array(cellCount);
   for (let f = 0; f < nFrames; f++) {
-    const tag = bytes[pos]; pos += 1;
-    if (tag === TAG_KEYFRAME) {
-      state = new Uint8Array(cellCount);
-      for (let i = 0; i < cellCount; i++) {
-        state[i] = (bytes[pos + (i >> 3)] >> (i & 7)) & 1;
-      }
-      pos += stride;
-    } else {
-      const nBorn = dv.getUint32(pos, true);
-      const nDied = dv.getUint32(pos + 4, true);
-      pos += 8;
-      state = state.slice();
-      for (let i = 0; i < nBorn; i++) state[dv.getUint32(pos + 4 * i, true)] = 1;
-      pos += 4 * nBorn;
-      for (let i = 0; i < nDied; i++) state[dv.getUint32(pos + 4 * i, true)] = 0;
-      pos += 4 * nDied;
+    const state = new Uint8Array(cellCount);
+    for (let i = 0; i < cellCount; i++) {
+      state[i] = (bytes[pos + (i >> 3)] >> (i & 7)) & 1;
     }
+    pos += stride;
     frames.push(state);
   }
-  return { cellCount, nFrames, keyframeInterval, frames };
+  return { cellCount, nFrames, frames };
 }
 
 // Fetch is RELATIVE (Pages-safe) and the filename is percent-encoded, matching
