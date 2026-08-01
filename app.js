@@ -13,19 +13,19 @@
 // vehicle dots are interpolated in JS at playback (Option A) and impact dots
 // flash at a stop the instant its event fires.
 
-import { loadAll, makeCityCache } from "./data.js?v=473979fc1a";
-import { loadLife } from "./life.js?v=473979fc1a";
-import { cellAlpha, precomputeDeaths, precomputeLastMode } from "./lifeview.js?v=473979fc1a";
+import { loadAll, makeCityCache } from "./data.js?v=44ea796489";
+import { loadLife } from "./life.js?v=44ea796489";
+import { cellAlpha, precomputeDeaths, precomputeLastMode } from "./lifeview.js?v=44ea796489";
 import { makeProjection, eventsInWindow, RippleField, realAge, clampSkip,
-         rippleLifeHorizon, nextEventInView, whisperText } from "./field.js?v=473979fc1a";
-import { vehiclePosition } from "./vehicles.js?v=473979fc1a";
-import { lifeSimSec, vehicleStyleFor } from "./lifevehicles.js?v=473979fc1a";
+         rippleLifeHorizon, nextEventInView, whisperText } from "./field.js?v=44ea796489";
+import { vehiclePosition } from "./vehicles.js?v=44ea796489";
+import { lifeSimSec, vehicleStyleFor } from "./lifevehicles.js?v=44ea796489";
 import { createCamera, cameraProjection, panBy, zoomAboutPoint, resizeCamera,
          startFlyTo, stepFlyTo, visibleBbox, viewWidthKm, projectInto,
-         inflateBbox, fitBboxScale } from "./camera.js?v=473979fc1a";
-import { createPlacePanel } from "./panel.js?v=473979fc1a";
-import { findById, flattenTree } from "./places.js?v=473979fc1a";
-import { loadCities, resolveSlug } from "./cities.js?v=473979fc1a";
+         inflateBbox, fitBboxScale } from "./camera.js?v=44ea796489";
+import { createPlacePanel } from "./panel.js?v=44ea796489";
+import { findById, flattenTree } from "./places.js?v=44ea796489";
+import { loadCities, resolveSlug } from "./cities.js?v=44ea796489";
 
 // ---- AOI bboxes (lon/lat), mirrored from src/region.py EXACTLY -----------
 // Helsinki-specific subareas (fly-to chips + the guided intro's zoomed-in
@@ -2041,6 +2041,24 @@ async function initApp() {
     // field and a nulled data bundle.
     if (currentSession !== session) return;
 
+    // v2.2: advance an in-flight fly-to; sync the projection every frame the
+    // camera is animating (manual input syncs eagerly in its own handlers).
+    //
+    // This runs ABOVE the hidden-tab guard on purpose. A fly-to is CAMERA
+    // work, not sim work: it mutates {cx, cy, scale} and costs a projection
+    // rebuild, no field clear and no GPU draw. Below the guard, a fly-to
+    // started while the tab was hidden was created and then never stepped —
+    // the district selection read back correctly (.dp-child.active) while the
+    // camera sat frozen with no error and no animation, and it only resolved
+    // if the tab happened to become visible again. Pan/wheel/dblclick never
+    // showed this because they mutate the camera eagerly in their own
+    // handlers; fly-to is the only camera move that defers to this loop.
+    if (flyAnim) {
+      const flying = stepFlyTo(flyAnim, camera, ts);
+      if (!flying) flyAnim = null;
+      syncProjection();
+    }
+
     if (document.hidden) {
       // Don't accumulate a dt spike across the hidden interval; just wait
       // for the tab to become visible again (visibilitychange resets
@@ -2053,14 +2071,6 @@ async function initApp() {
     const dtRealMs = state.paused ? 0 : ts - state.lastFrameTs;
     state.lastFrameTs = ts;
     recordFrameDt(dtRealMs);
-
-    // v2.2: advance an in-flight fly-to; sync the projection every frame the
-    // camera is animating (manual input syncs eagerly in its own handlers).
-    if (flyAnim) {
-      const flying = stepFlyTo(flyAnim, camera, ts);
-      if (!flying) flyAnim = null;
-      syncProjection();
-    }
 
     // ---- Life mode: replay baked generations ---------------------------------
     // A COMPLETE, EARLY-RETURNING branch. It shares the loop's frame pacing,
