@@ -13,18 +13,19 @@
 // vehicle dots are interpolated in JS at playback (Option A) and impact dots
 // flash at a stop the instant its event fires.
 
-import { loadAll, makeCityCache } from "./data.js?v=5c81adcc78";
-import { loadLife } from "./life.js?v=5c81adcc78";
-import { cellAlpha, precomputeDeaths, precomputeLastMode } from "./lifeview.js?v=5c81adcc78";
+import { loadAll, makeCityCache } from "./data.js?v=473979fc1a";
+import { loadLife } from "./life.js?v=473979fc1a";
+import { cellAlpha, precomputeDeaths, precomputeLastMode } from "./lifeview.js?v=473979fc1a";
 import { makeProjection, eventsInWindow, RippleField, realAge, clampSkip,
-         rippleLifeHorizon, nextEventInView, whisperText } from "./field.js?v=5c81adcc78";
-import { vehiclePosition } from "./vehicles.js?v=5c81adcc78";
+         rippleLifeHorizon, nextEventInView, whisperText } from "./field.js?v=473979fc1a";
+import { vehiclePosition } from "./vehicles.js?v=473979fc1a";
+import { lifeSimSec, vehicleStyleFor } from "./lifevehicles.js?v=473979fc1a";
 import { createCamera, cameraProjection, panBy, zoomAboutPoint, resizeCamera,
          startFlyTo, stepFlyTo, visibleBbox, viewWidthKm, projectInto,
-         inflateBbox, fitBboxScale } from "./camera.js?v=5c81adcc78";
-import { createPlacePanel } from "./panel.js?v=5c81adcc78";
-import { findById, flattenTree } from "./places.js?v=5c81adcc78";
-import { loadCities, resolveSlug } from "./cities.js?v=5c81adcc78";
+         inflateBbox, fitBboxScale } from "./camera.js?v=473979fc1a";
+import { createPlacePanel } from "./panel.js?v=473979fc1a";
+import { findById, flattenTree } from "./places.js?v=473979fc1a";
+import { loadCities, resolveSlug } from "./cities.js?v=473979fc1a";
 
 // ---- AOI bboxes (lon/lat), mirrored from src/region.py EXACTLY -----------
 // Helsinki-specific subareas (fly-to chips + the guided intro's zoomed-in
@@ -688,6 +689,8 @@ async function initApp() {
       lifePos: state.lifePos,
       liveCells: state.lifeLiveCells,
       drawnCells: state.lifeDrawnCells,
+      vehicleDots: state.lifeVehicleDots,
+      vehicleClipped: state.lifeVehicleClipped,
     });
   }
 
@@ -729,6 +732,8 @@ async function initApp() {
     lifeDeathsFor: new Map(), // subarea name -> the exact stream its index came from
     lifeModes: new Map(),     // subarea name -> per-gen last-live-mode arrays (precomputeLastMode)
     lifeModesFor: new Map(),  // subarea name -> the exact stream its index came from
+    lifeVehicleDots: 0,     // dots stamped this frame (live gate reads this)
+    lifeVehicleClipped: false, // true once VEHICLE_DOT_BUDGET truncated a frame
   };
   // Deep-link params describe how the PAGE was opened, so they are applied
   // on the first boot only. Re-applying them on a city switch would yank the
@@ -1698,6 +1703,68 @@ async function initApp() {
       if (n > 0) {
         field.stamp(lifeSegs[m], lifeAlphas[m], lifeAges[m], MODE_COLORS[m], LIFE_PARAMS, n);
       }
+    }
+
+    drawLifeVehicles();
+  }
+
+  // ---- Life vehicle dots ---------------------------------------------------
+  // Real vehicles moving over the Life street field. Two deliberate
+  // departures from ripple's equivalent block (app.js ~2118):
+  //
+  // 1. DRAWS WHILE PAUSED. Ripple skips vehicles when paused because its
+  //    state.t stops advancing, leaving no meaningful "live" set. Life's clock
+  //    is derived from lifePos, which is well-defined paused or playing, so a
+  //    paused frame shows every vehicle at its true position for that
+  //    generation. Scrubbing is a primary Life interaction and every gate
+  //    screenshot is paused -- dropping dots when paused would make the
+  //    feature unverifiable by the method used to verify the rest of Life.
+  //
+  // 2. ONE DRAW CALL PER MODE. stampDots takes size as a per-call UNIFORM
+  //    (field.js:294), so per-mode sizing cannot be done in a single call.
+  //    Points are bucketed by mode, exactly as the street path above buckets
+  //    by colour slot. Ripple's single call works only because it uses one
+  //    size for every mode.
+  function drawLifeVehicles() {
+    if (!vehData || !vehicleMeta) return;   // older bake without vehicle bins
+    const simSec = lifeSimSec(state.lifePos, lifeNFrames(), session.lifeMeta);
+    if (simSec === null) return;            // stream meta has no clock
+
+    const MODE_N_V = MODE_COLORS.length;
+    const pts = Array.from({ length: MODE_N_V }, () => []);
+    const cols = Array.from({ length: MODE_N_V }, () => []);
+    const bb = viewBbox();
+    let pushed = 0;
+
+    for (let ti = 0; ti < vehData.trips.length && pushed < VEHICLE_DOT_BUDGET; ti++) {
+      const trip = vehData.trips[ti];
+      const pos = vehiclePosition(trip, simSec, vehData);
+      if (!pos) continue;
+      const [x, y] = pos;
+      // Viewport cull on UNPROJECTED coords -- cheaper than projecting first.
+      if (x < bb[0] || x > bb[2] || y < bb[1] || y > bb[3]) continue;
+      const mode = MODE_CODE(vehData.routes[trip.shape].mode);
+      const slot = (mode >= 0 && mode < MODE_N_V) ? mode : 3;
+      const [px, py] = state.proj.fn(x, y);
+      const c = MODE_COLORS[slot];
+      const st = vehicleStyleFor(slot);
+      pts[slot].push(px, py);
+      cols[slot].push(c[0], c[1], c[2], st.alpha);
+      pushed++;
+    }
+
+    // Budget clipping must be VISIBLE, not silent: a truncated frame that
+    // reports nothing reads as "covered everything" when it did not.
+    if (pushed >= VEHICLE_DOT_BUDGET) {
+      state.lifeVehicleClipped = true;
+    }
+    state.lifeVehicleDots = pushed;
+
+    // Draw rarest LAST so the loudest dots land on top of the bus wash.
+    for (let m = MODE_N_V - 1; m >= 0; m--) {
+      if (pts[m].length === 0) continue;
+      field.stampDots(Float32Array.from(pts[m]), Float32Array.from(cols[m]),
+                      vehicleStyleFor(m).size);
     }
   }
 
