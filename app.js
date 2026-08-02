@@ -13,19 +13,20 @@
 // vehicle dots are interpolated in JS at playback (Option A) and impact dots
 // flash at a stop the instant its event fires.
 
-import { loadAll, makeCityCache } from "./data.js?v=44ea796489";
-import { loadLife } from "./life.js?v=44ea796489";
-import { cellAlpha, precomputeDeaths, precomputeLastMode } from "./lifeview.js?v=44ea796489";
+import { loadAll, makeCityCache } from "./data.js?v=3568b75381";
+import { loadLife } from "./life.js?v=3568b75381";
+import { cellAlpha, precomputeDeaths, precomputeLastMode } from "./lifeview.js?v=3568b75381";
 import { makeProjection, eventsInWindow, RippleField, realAge, clampSkip,
-         rippleLifeHorizon, nextEventInView, whisperText } from "./field.js?v=44ea796489";
-import { vehiclePosition } from "./vehicles.js?v=44ea796489";
-import { lifeSimSec, vehicleStyleFor } from "./lifevehicles.js?v=44ea796489";
+         rippleLifeHorizon, nextEventInView, whisperText,
+         normalizeStampIntensity } from "./field.js?v=3568b75381";
+import { vehiclePosition } from "./vehicles.js?v=3568b75381";
+import { lifeSimSec, vehicleStyleFor } from "./lifevehicles.js?v=3568b75381";
 import { createCamera, cameraProjection, panBy, zoomAboutPoint, resizeCamera,
          startFlyTo, stepFlyTo, visibleBbox, viewWidthKm, projectInto,
-         inflateBbox, fitBboxScale } from "./camera.js?v=44ea796489";
-import { createPlacePanel } from "./panel.js?v=44ea796489";
-import { findById, flattenTree } from "./places.js?v=44ea796489";
-import { loadCities, resolveSlug } from "./cities.js?v=44ea796489";
+         inflateBbox, fitBboxScale } from "./camera.js?v=3568b75381";
+import { createPlacePanel } from "./panel.js?v=3568b75381";
+import { findById, flattenTree } from "./places.js?v=3568b75381";
+import { loadCities, resolveSlug } from "./cities.js?v=3568b75381";
 
 // ---- AOI bboxes (lon/lat), mirrored from src/region.py EXACTLY -----------
 // Helsinki-specific subareas (fly-to chips + the guided intro's zoomed-in
@@ -379,7 +380,7 @@ async function initApp() {
   const stepCaptionEl = document.getElementById("step-caption");
   const stepNextEl = document.getElementById("step-next");
   const stepExploreEl = document.getElementById("step-explore");
-  const modeToggleEl = document.getElementById("mode-toggle");
+  const modeRailEl = document.getElementById("mode-rail");
   const modeRipplesEl = document.getElementById("mode-ripples");
   const modeLifeEl = document.getElementById("mode-life");
   const helpBtnEl = document.getElementById("help-btn");
@@ -551,6 +552,36 @@ async function initApp() {
   const streets = d.streets;
   const stops = d.stops; // flat [x0,y0, x1,y1, ...] per stop (lon/lat)
   const horizonSec = manifest.horizon_sec;
+
+  // Capacity constant for un-quantizing stampIntensity (Task 3 fix round 1).
+  // `cp.max_mode_weight` is the SAME divisor bake_ripples.py used to
+  // renormalize stamp_intensity before quantizing into uint16 (see
+  // pushEdge's stampIntensity comment below, and normalizeStampIntensity's
+  // own doc comment in field.js, for the full derivation) -- it must be READ
+  // from the manifest, not hardcoded, because a per-city `capacity_override`
+  // can change the effective max weight and the client would otherwise have
+  // no way to know. Falls back to today's known value (10.0, metro's weight)
+  // so an older cached manifest without the `capacity` block reproduces the
+  // exact behavior this fix round shipped with, matching the existing
+  // `manifest.ripple_real || {}` fallback idiom above. `manifest.capacity.
+  // reference_weight` (always 1.0 by construction today) is emitted too but
+  // not consumed here -- normalizeStampIntensity's math only needs the max;
+  // the reference weight is documentation for the manifest's own reader and
+  // a seam for a future per-city assertion, not dead weight in this file.
+  // The fallback is LOUD on purpose. A bundle baked before capacity weighting
+  // has no `capacity` block, so this silently multiplied already-renormalized
+  // stamp intensities by 10.0 and rendered ~5.8x too bright -- it did not
+  // crash, it rendered plausibly-wrong, which is the failure shape that cost
+  // a whole session to find. A stale bundle must announce itself.
+  const cp = manifest.capacity || {};
+  if (cp.max_mode_weight == null) {
+    console.warn(
+      "[world-ripples] manifest.capacity.max_mode_weight is MISSING -- this " +
+      "city's bundle predates capacity weighting. Falling back to 10.0; " +
+      "ripple intensities will render far too bright until it is re-baked."
+    );
+  }
+  const MAX_MODE_WEIGHT = cp.max_mode_weight ?? 10.0;
 
   // v2.1: band params are REAL-seconds tuned (see field.js realAge). Prefer
   // the manifest's ripple_real block; fall back to the same values hardcoded
@@ -1209,13 +1240,16 @@ async function initApp() {
     }
   }
 
-  // Life is baked for Helsinki only (plan scope), so the toggle is HIDDEN
+  // Life is baked for Helsinki only (plan scope), so the rail is HIDDEN
   // rather than shown-and-broken for any other city. boot() runs per city, so
   // this is re-evaluated on every switch.
-  if (modeToggleEl) {
-    modeToggleEl.hidden = slug !== "helsinki";
+  if (modeRailEl) {
+    modeRailEl.hidden = slug !== "helsinki";
   }
   syncModeButtons();
+  // #mode-history is deliberately given NO listener: it is `disabled`, so it
+  // cannot be clicked or keyboard-activated, and a handler that called nothing
+  // would just be dead code to trip over when the APC mode lands.
   modeRipplesEl?.addEventListener("click", () => { setMode("ripples"); }, { signal: abort.signal });
   modeLifeEl?.addEventListener("click", () => { setMode("life"); }, { signal: abort.signal });
 
@@ -1512,6 +1546,10 @@ async function initApp() {
   const modeSegs = Array.from({ length: MODE_N }, () => new Float32Array(segCap * 2));
   const modeDelays = Array.from({ length: MODE_N }, () => new Float32Array(segCap));
   const modeAges = Array.from({ length: MODE_N }, () => new Float32Array(segCap));
+  // Per-vertex capacity-weighted intensity (Task 3), same footing as
+  // modeDelays/modeAges: pre-sized, grown-never-shrunk, one float per vertex.
+  // Normalized to 0..1 in pushEdge (see the stampIntensity comment there).
+  const modeIntens = Array.from({ length: MODE_N }, () => new Float32Array(segCap));
   const modeCount = new Uint32Array(MODE_N); // vertices written this pass
 
   // Grow mode m's buffers to hold at least `needVerts` vertices, preserving
@@ -1523,6 +1561,7 @@ async function initApp() {
     const s = new Float32Array(cap * 2); s.set(modeSegs[m]); modeSegs[m] = s;
     const d = new Float32Array(cap); d.set(modeDelays[m]); modeDelays[m] = d;
     const a = new Float32Array(cap); a.set(modeAges[m]); modeAges[m] = a;
+    const it = new Float32Array(cap); it.set(modeIntens[m]); modeIntens[m] = it;
   }
 
   // Reset all write indices. Replaces the three `for (const arr of ...)
@@ -1804,6 +1843,43 @@ async function initApp() {
   // that /65535 normalization was for the old scalar intensity model, which
   // the band model no longer uses.
   //
+  // stampIntensity[k], unlike stampDelay, DOES need de-quantizing (Task 3,
+  // fixed round 1 after review caught the original version dimming the
+  // WHOLE scene). It is a capacity-weighted uint16 baked by
+  // projects/helsinki-ripples/src/bake_ripples.py (Task 2 — a DIFFERENT
+  // project from this shader) as:
+  //   w = weight_for(mode, override) / MAX_MODE_WEIGHT      # bake_ripples.py:213
+  //   stamp_intensity = _quant_u16(inten * w, 65535, 0xFFFF) # bake_ripples.py:217
+  // Two separate operations happened, so de-quantizing needs to undo BOTH:
+  //   1. `_quant_u16(x, 65535, ...)` scaled a 0..1 float up by 65535 before
+  //      storing as uint16 -- undo with `/ 65535.0`.
+  //   2. `weight_for(mode) / MAX_MODE_WEIGHT` renormalized the capacity
+  //      weight DOWN by the heaviest mode's weight (10.0, metro) so nothing
+  //      clipped at bake time -- undo by multiplying back UP by that same
+  //      MAX_MODE_WEIGHT, recovering weight_for(mode) itself (bus=1.0,
+  //      metro=10.0, ...), not the renormalized 0.1..1.0 fraction.
+  // Doing only step 1 (the bug this comment used to describe) leaves every
+  // vertex multiplied by `weight_for(mode)/MAX_MODE_WEIGHT` instead of
+  // `weight_for(mode)` -- i.e. the WHOLE scene dims by MAX_MODE_WEIGHT
+  // (10x), because even bus (the reference mode, weight 1.0) is left at
+  // 1/10 instead of 1.0. Doing both steps restores bus to exactly the
+  // brightness it rendered at before this attribute existed (weight 1.0)
+  // and lets metro reach 10x that -- the actual "rail brighter than bus"
+  // goal, not "bus 10x darker than it used to be".
+  //
+  // MAX_MODE_WEIGHT is READ from the manifest (see `cp` above), never
+  // hardcoded: `cfg.capacity_override` can change the effective max weight
+  // per city, and a hardcoded client constant would silently desync from a
+  // bake that used a different one.
+  //
+  // Multiplying bus back up to 1.0 necessarily pushes metro (10x) into
+  // territory the existing `1-exp(-x*glowStrength)` present-shader tonemap
+  // was not tuned for -- that is the accumulation-saturation risk the plan
+  // reserves `log1p` for (applied in PRESENT_FS, not here: this file only
+  // produces the per-vertex intensity that gets additively accumulated;
+  // the compression happens once, at the point where the accumulated sum is
+  // read back for display).
+  //
   // Every stop stamps unconditionally (v2.2 retired AOI/district admission
   // filtering — spec Q4-A): resolveStopBuffer only decides WHICH city street
   // buffer a stop's edges live in (via the baked stopCity code — never
@@ -1845,6 +1921,8 @@ async function initApp() {
     const delay = stampDelay[k];
     modeDelays[mode][n] = delay; modeDelays[mode][n + 1] = delay;
     modeAges[mode][n] = age;     modeAges[mode][n + 1] = age;
+    const inten = normalizeStampIntensity(stampIntensity[k], MAX_MODE_WEIGHT);
+    modeIntens[mode][n] = inten; modeIntens[mode][n + 1] = inten;
     modeCount[mode] = n + 2;
   }
 
@@ -1894,7 +1972,7 @@ async function initApp() {
       // Pass the buffers whole plus an explicit vertex count -- no
       // Float32Array.from() copy, no subarray() allocation. field.stamp
       // uploads only the first n vertices via bufferSubData.
-      field.stamp(modeSegs[m], modeDelays[m], modeAges[m], MODE_COLORS[m], params, n);
+      field.stamp(modeSegs[m], modeDelays[m], modeAges[m], MODE_COLORS[m], params, n, modeIntens[m]);
     }
   }
 

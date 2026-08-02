@@ -90,23 +90,45 @@ body { font: 15px/1.45 system-ui, sans-serif; color: #e8e8ec; background: #10142
 #speed-readout { min-width: 3.2em; text-align: center; color: #fff;
   font-variant-numeric: tabular-nums; font-size: 13px; }
 
-/* ---------- mode toggle: Ripples | Life ----------
-   Same pill language as #city-picker/#aoi-picker (identical padding, border,
-   radius and the cyan .active fill), so it reads as part of the existing bar
-   rather than a bolted-on control. Ripples carries .active on load. */
-#mode-toggle { display: flex; justify-content: center; gap: 6px; }
-#mode-toggle button {
-  padding: 4px 14px; border: 1px solid #2a313d; background: rgba(16,20,32,.82);
-  color: #c7ccd6; border-radius: 999px; cursor: pointer; font: inherit;
-  font-size: 12px; transition: all .15s;
+/* ---------- mode rail: Ripples | Life | History ----------
+   A LEFT-edge rail mirroring #district-panel on the right. Same dark
+   translucent fill and #2a313d border as that panel so the two read as a
+   matched pair of edge controls, with the radius mirrored (rounded on the
+   inner/right side, flush against the left screen edge).
+
+   The cyan .active fill is carried over verbatim from the old bottom-bar
+   toggle — the selection language does not change, only its location. */
+#mode-rail {
+  position: fixed; left: 0; top: 50%; transform: translateY(-50%); z-index: 6;
+  display: flex; flex-direction: column; gap: 6px; padding: 10px;
+  background: rgba(14,18,30,.9); border: 1px solid #2a313d; border-left: none;
+  border-radius: 0 10px 10px 0;
 }
-#mode-toggle button.active {
+#mode-rail button {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+  min-width: 84px; padding: 7px 12px; border: 1px solid #2a313d;
+  background: rgba(16,20,32,.82); color: #c7ccd6; border-radius: 8px;
+  cursor: pointer; font: inherit; font-size: 12px; text-align: left;
+  transition: all .15s;
+}
+#mode-rail button:hover:not([disabled]) { border-color: #46505f; color: #e8e8ec; }
+#mode-rail button.active {
   background: #6fd3e6; color: #061014; border-color: #6fd3e6; font-weight: 600;
 }
-#mode-toggle button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+#mode-rail button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+/* Disabled = History until the APC pipeline exists. `cursor: default` and the
+   dropped opacity are the affordance; `pointer-events` is deliberately NOT
+   disabled so the title tooltip explaining WHY still appears on hover. */
+#mode-rail button[disabled] {
+  opacity: .38; cursor: default; background: rgba(16,20,32,.5);
+}
+.mr-sub {
+  font-size: 9px; letter-spacing: .08em; text-transform: uppercase;
+  color: #7d8494; font-weight: 400;
+}
 /* Same [hidden] specificity trap the overlays hit: the ID rule above would
    otherwise beat the UA stylesheet's display:none. */
-#mode-toggle[hidden] { display: none !important; }
+#mode-rail[hidden] { display: none !important; }
 /* Generation readout replaces the clock's slot while Life is active; it is
    plain text in #clock, so it inherits the tabular-nums treatment already
    there and needs no extra rule. */
@@ -117,7 +139,8 @@ body.chrome-hidden #chrome,
 body.chrome-hidden #fullscreen-btn,
 body.chrome-hidden #help-btn,
 body.chrome-hidden #credits-btn,
-body.chrome-hidden #district-panel { opacity: 0; pointer-events: none;
+body.chrome-hidden #district-panel,
+body.chrome-hidden #mode-rail { opacity: 0; pointer-events: none;
   transition: opacity .4s; }
 
 /* ---------- intro overlay + click-stepper ----------
@@ -285,11 +308,18 @@ body.chrome-hidden #district-panel { opacity: 0; pointer-events: none;
   #transport { order: 4; flex-wrap: wrap; gap: 5px; }
   #transport button, #play-pause { padding: 6px 9px; font-size: 12px; }
 
-  /* #mode-toggle sits between transport and the utility row in DOM order, but
-     both of those carry explicit `order` here — without one of its own the
-     toggle (order:0) would jump above the clock. `order` must be an INTEGER,
-     so the toggle takes 5 and the utility row is pushed to 6. */
-  #mode-toggle { order: 5; }
+  /* The mode switcher is no longer a #chrome flex child (it is the fixed
+     left-edge #mode-rail), so the `order: 5` slot it used to occupy here is
+     gone. #utility keeps order 6 — the values need not be contiguous, and
+     renumbering it would be churn for no layout change. */
+
+  /* Narrow screens: shrink the rail rather than move it. The district panel
+     becomes a BOTTOM sheet under 640px and #chrome owns the bottom strip, so
+     the left edge stays free — but the rail must clear both. Vertically
+     centred at 50% it sits above the chrome bar even at 360px wide. */
+  #mode-rail { padding: 6px; gap: 4px; }
+  #mode-rail button { min-width: 0; padding: 6px 9px; font-size: 11px; }
+  .mr-sub { font-size: 8px; }
 
   /* The panel tab's 148px bottom margin was cleared for the OLD chrome height;
      the utility row adds ~40px, so lift it to keep the tab clear of the bar. */

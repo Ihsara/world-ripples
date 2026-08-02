@@ -3,7 +3,7 @@
 // lifeview.js. The drawing itself lives in app.js because it needs the
 // closure-scoped field/camera/data.
 
-import { lifeSplit } from "./app.js?v=44ea796489";
+import { lifeSplit } from "./app.js?v=3568b75381";
 
 /**
  * Sim-seconds for a fractional Life position.

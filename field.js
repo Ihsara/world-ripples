@@ -68,6 +68,26 @@ export function whisperText(dsec) {
   if (dsec <= 120) return `next ripple · ${dsec}s`;
   return "";
 }
+// normalizeStampIntensity — inverts BOTH steps of bake_ripples.py's
+// stamp_intensity quantization (projects/helsinki-ripples/src/bake_ripples.py,
+// a DIFFERENT project from this shader):
+//   w = weight_for(mode, override) / maxModeWeight        # bake_ripples.py:213
+//   stamp_intensity = round(clamp(inten * w * 65535, 0, 65535))  # :217 (_quant_u16)
+// Step 1 (`_quant_u16`) scaled a 0..1 float up by 65535 before storing as a
+// uint16 -- undo with `/ 65535`. Step 2 (`weight_for(mode) / maxModeWeight`)
+// renormalized the capacity weight DOWN by the heaviest mode's weight so
+// nothing clipped at bake time -- undo by multiplying back UP by that same
+// maxModeWeight. Skipping step 2 (dividing by 65535 alone) leaves every
+// vertex at `weight_for(mode)/maxModeWeight` instead of `weight_for(mode)` --
+// the whole scene dims by maxModeWeight, because even the reference mode
+// (weight 1.0) is left at `1/maxModeWeight` instead of 1.0. This was Task 3's
+// original bug (review round 1): ratios were right, absolute scale was not.
+// `maxModeWeight` must come from the bake's manifest (`manifest.capacity.
+// max_mode_weight`), never a hardcoded literal -- a per-city capacity
+// override can change the effective divisor the bake actually used.
+export function normalizeStampIntensity(rawU16, maxModeWeight) {
+  return (rawU16 / 65535) * maxModeWeight;
+}
 // bandBrightness mirrors ripplesim.ripple.edge_brightness (the Python reference):
 // a moving BAND — bright crest at the wavefront (front = age*frontSpeed) + a faint
 // trailing wake — NOT a filled disc. This is the fix for the "whole street brightens"
@@ -100,10 +120,24 @@ out vec4 o;
 void main(){
   vec4 s = texture(tex, uv);
   vec3 base = vec3(0.063,0.078,0.125);
-  // Soft (exponential) tonemap: 1.0 - exp(-x*k) asymptotes to 1.0 but never
-  // clips, so a hub with many overlapping ripples brightens/saturates
-  // instead of blowing out to white. Base stays visible everywhere.
-  vec3 glow = 1.0 - exp(-s.rgb * glowStrength);
+  // log1p compression on the ACCUMULATED sum (Task 3 fix round 1, the
+  // review's ruling): restoring stampIntensity's reference mode (bus) to
+  // its true weight of 1.0 (see normalizeStampIntensity in this file, and
+  // pushEdge's comment in app.js) necessarily lets metro reach 10x that,
+  // which pushes the accumulated per-pixel sum at a hub well past what the
+  // existing exponential tonemap alone was tuned for. GLSL has no built-in
+  // log1p, so log(1.0+x) is the direct equivalent -- defined and finite for
+  // every x>=0 (additive accumulation is never negative), and, crucially,
+  // log1p(0)=0 so an unlit pixel is untouched. This compresses the wide
+  // dynamic range BEFORE the existing 1-exp(-x*k) tonemap runs, rather than
+  // replacing it: log1p tames how fast large sums grow, exp still supplies
+  // the "asymptotes to 1.0, never clips to white" ceiling. Composing the two
+  // (log1p then exp-tonemap) is the plan's explicit split -- "linear where
+  // capacity is a real physical ratio [the per-vertex inten multiply],
+  // log1p where saturation is the real risk [here, at the accumulated sum]"
+  // -- not a replacement for either existing mechanism.
+  vec3 compressed = log(1.0 + s.rgb);
+  vec3 glow = 1.0 - exp(-compressed * glowStrength);
   o = vec4(base + glow, 1.0);
 }`;
 // stamp: draw colored line segments, additive; intensity in a per-vertex attr.
@@ -112,13 +146,13 @@ void main(){
 // resorting to a multi-tap blur (kept cheap for the Task-12 perf gate).
 const STAMP_BRIGHTNESS = 1.6;
 const STAMP_VS = `#version 300 es
-in vec2 p; in float delay; in float age; uniform vec2 res;
-out float vDelay; out float vAge;
-void main(){ vDelay=delay; vAge=age;
+in vec2 p; in float delay; in float age; in float inten; uniform vec2 res;
+out float vDelay; out float vAge; out float vInten;
+void main(){ vDelay=delay; vAge=age; vInten=inten;
   vec2 c=(p/res)*2.0-1.0; gl_Position=vec4(c.x,-c.y,0.,1.); }`;
 const STAMP_FS = `#version 300 es
 precision highp float;
-in float vDelay; in float vAge;
+in float vDelay; in float vAge; in float vInten;
 uniform vec3 color; uniform float brightness;
 uniform float frontSpeed, thickness, wakeTau, wakeLevel, lifeTau;
 out vec4 o;
@@ -132,6 +166,7 @@ void main(){
     b = (crest + wakeLevel * wake) * exp(-age / lifeTau);
   }
   b *= brightness;
+  b *= vInten;
   o = vec4(color * b, b);   // additive; overlapping ripples ADD
 }`;
 
@@ -171,8 +206,9 @@ export class RippleField {
     this._alloc(width, height);
     this.segBuf = gl.createBuffer(); this.intBuf = gl.createBuffer();
     this.delayBuf = gl.createBuffer(); this.ageBuf = gl.createBuffer();
+    this.intenBuf = gl.createBuffer();
     this.ptBuf = gl.createBuffer(); this.ptColBuf = gl.createBuffer();
-    this._segCap = 0; this._delayCap = 0; this._ageCap = 0;
+    this._segCap = 0; this._delayCap = 0; this._ageCap = 0; this._intenCap = 0;
 
     // Task 12 perf gate: cache all uniform/attribute locations ONCE per
     // program right after linking, instead of calling getUniformLocation /
@@ -200,6 +236,7 @@ export class RippleField {
       p:          gl.getAttribLocation(this.stampP, "p"),
       delay:      gl.getAttribLocation(this.stampP, "delay"),
       age:        gl.getAttribLocation(this.stampP, "age"),
+      inten:      gl.getAttribLocation(this.stampP, "inten"),
     };
     this.presentLoc = {
       tex:          gl.getUniformLocation(this.presentP, "tex"),
@@ -249,7 +286,14 @@ export class RippleField {
     gl.uniform1f(loc.k, k);
     this._drawQuad(this.decayP, this.quadLoc.decay); this.cur = dst;
   }
-  stamp(segVertices, delays, ages, color, params, vertexCount) {
+  // intensities: optional per-vertex 0..1 Float32Array, same footing as
+  // delays/ages (pre-sized scratch buffer, first `vertexCount` valid). Omit
+  // it (undefined/null) to get a full-intensity (1.0) draw everywhere --
+  // that is the Life caller's contract: Life's CA has no per-vertex capacity
+  // signal (Task 4), so it must render byte-for-byte unchanged from before
+  // this attribute existed. `_uploadConst` fills the GPU buffer with a
+  // repeated 1.0 without requiring the caller to allocate/fill a real array.
+  stamp(segVertices, delays, ages, color, params, vertexCount, intensities) {
     const gl = this.gl, loc = this.stampLoc;
     // Callers may pass pre-sized scratch buffers with only the first
     // `vertexCount` vertices valid. Older callers pass exact-sized arrays and
@@ -270,6 +314,11 @@ export class RippleField {
     this._upload(this.segBuf, segVertices, n * 2, loc.p, 2, "_segCap");
     this._upload(this.delayBuf, delays, n, loc.delay, 1, "_delayCap");
     this._upload(this.ageBuf, ages, n, loc.age, 1, "_ageCap");
+    if (intensities === undefined || intensities === null) {
+      this._uploadConst(loc.inten, 1.0);
+    } else {
+      this._upload(this.intenBuf, intensities, n, loc.inten, 1, "_intenCap");
+    }
     gl.drawArrays(gl.LINES, 0, n);
   }
 
@@ -290,6 +339,16 @@ export class RippleField {
     gl.bufferSubData(gl.ARRAY_BUFFER, 0, src, 0, count);
     gl.enableVertexAttribArray(attribLoc);
     gl.vertexAttribPointer(attribLoc, size, gl.FLOAT, false, 0, 0);
+  }
+  // Bind `attribLoc` to a constant value for every vertex in the draw call,
+  // without uploading a filled per-vertex buffer. Used for the Life caller's
+  // intensity attribute (always 1.0) -- disableVertexAttribArray + the
+  // vertexAttrib1f constant is the standard WebGL2 way to give an `in float`
+  // attribute a uniform-like value: no allocation, no upload needed.
+  _uploadConst(attribLoc, value) {
+    const gl = this.gl;
+    gl.disableVertexAttribArray(attribLoc);
+    gl.vertexAttrib1f(attribLoc, value);
   }
   stampDots(pointsXY, colorsRGBA, sizePx) {
     const gl = this.gl, loc = this.pointLoc;
