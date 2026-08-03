@@ -13,20 +13,23 @@
 // vehicle dots are interpolated in JS at playback (Option A) and impact dots
 // flash at a stop the instant its event fires.
 
-import { loadAll, makeCityCache } from "./data.js?v=3568b75381";
-import { loadLife } from "./life.js?v=3568b75381";
-import { cellAlpha, precomputeDeaths, precomputeLastMode } from "./lifeview.js?v=3568b75381";
+import { loadAll, makeCityCache } from "./data.js?v=6c0489b20a";
+import { loadLife } from "./life.js?v=6c0489b20a";
+import { cellAlpha, precomputeDeaths, precomputeLastMode } from "./lifeview.js?v=6c0489b20a";
 import { makeProjection, eventsInWindow, RippleField, realAge, clampSkip,
          rippleLifeHorizon, nextEventInView, whisperText,
-         normalizeStampIntensity } from "./field.js?v=3568b75381";
-import { vehiclePosition } from "./vehicles.js?v=3568b75381";
-import { lifeSimSec, vehicleStyleFor } from "./lifevehicles.js?v=3568b75381";
+         normalizeStampIntensity } from "./field.js?v=6c0489b20a";
+import { vehiclePosition } from "./vehicles.js?v=6c0489b20a";
+import { deriveCorridorWeights, buildCorridorGeometry, corridorWidth,
+         corridorBrightness, edgeModeCounts, overlapColour, MODE_RANK,
+         COLOUR_MODES } from "./corridors.js?v=6c0489b20a";
+import { lifeSimSec, vehicleStyleFor } from "./lifevehicles.js?v=6c0489b20a";
 import { createCamera, cameraProjection, panBy, zoomAboutPoint, resizeCamera,
          startFlyTo, stepFlyTo, visibleBbox, viewWidthKm, projectInto,
-         inflateBbox, fitBboxScale } from "./camera.js?v=3568b75381";
-import { createPlacePanel } from "./panel.js?v=3568b75381";
-import { findById, flattenTree } from "./places.js?v=3568b75381";
-import { loadCities, resolveSlug } from "./cities.js?v=3568b75381";
+         inflateBbox, fitBboxScale } from "./camera.js?v=6c0489b20a";
+import { createPlacePanel } from "./panel.js?v=6c0489b20a";
+import { findById, flattenTree } from "./places.js?v=6c0489b20a";
+import { loadCities, resolveSlug } from "./cities.js?v=6c0489b20a";
 
 // ---- AOI bboxes (lon/lat), mirrored from src/region.py EXACTLY -----------
 // Helsinki-specific subareas (fly-to chips + the guided intro's zoomed-in
@@ -746,6 +749,9 @@ async function initApp() {
     t: 18000, // 08:00 sim-sec — a busy frame, inside [dataMin, dataMax]
     speed: 60,
     paused: false,
+    // "additive" | "identity" | "overlap" — see corridors.js COLOUR_MODES.
+    // Defaults to the shipped additive behaviour so this is opt-in.
+    colourMode: "additive",
     district: null, // null | place-tree node {id, name, bbox, ring} — the highlighted place
     sePtr: 0,
     proj: null,
@@ -856,6 +862,37 @@ async function initApp() {
   }
   // The session owns the field from here on; teardown() disposes it.
   session.field = field;
+
+  // Route geometry already ships for vehicle interpolation. Prepare its
+  // capacity-weighted corridor segments once per bundle and upload one STATIC
+  // VBO; the vertex shader expands each instance into its six quad corners.
+  // Only projection uniforms change while the camera moves.
+  if (d.routes && d.vehicleShapeCoords) {
+    const weights = deriveCorridorWeights(manifest, stopMode, stampIndex, stampIntensity);
+    const geometry = buildCorridorGeometry(d.routes, d.vehicleShapeCoords, weights);
+    field.setCorridors(geometry.vertices, geometry.batches);
+  }
+  const corridorColors = Object.fromEntries(Object.entries(manifest.mode_codes || {})
+    .map(([mode, code]) => [mode, MODE_COLORS[code]]));
+
+  // Per-edge colour-mode lookups, computed ONCE per bundle (not per frame).
+  // `edgeWinner[e]` = the mode CODE that owns edge e under identity mode;
+  // `edgeModeN[e]`  = how many distinct modes serve edge e, for overlap mode.
+  const modeNamesByCode = [];
+  for (const [name, code] of Object.entries(manifest.mode_codes || {})) modeNamesByCode[code] = name;
+  const edgeModeN = edgeModeCounts(stopMode, stampIndex, stampEdge, modeNamesByCode);
+  const edgeWinner = new Int16Array(edgeModeN.length).fill(-1);
+  {
+    const rankOf = (code) => MODE_RANK[modeNamesByCode[code]] ?? Infinity;
+    const stops = stampIndex.length / 2;
+    for (let stop = 0; stop < stops; stop++) {
+      const mode = stopMode[stop], off = stampIndex[2 * stop], cnt = stampIndex[2 * stop + 1];
+      for (let k = off; k < off + cnt; k++) {
+        const e = stampEdge[k], cur = edgeWinner[e];
+        if (cur === -1 || rankOf(mode) < rankOf(cur)) edgeWinner[e] = mode;
+      }
+    }
+  }
 
   // The guided intro confines its snapshot projection (introProj) to the TOP
   // portion of the canvas (clear of the bottom-anchored #stepper-card) so a
@@ -1323,6 +1360,10 @@ async function initApp() {
   // production app does not expose mutable internals.
   if (new URLSearchParams(location.search).get("capture") === "1") {
     window.__wrCamera = camera;
+    // Exposed for the corridor gate's --only=<mode> diagnostic: a faint line
+    // cannot be told from its neighbours by eye, so the gate isolates one
+    // mode's batches to prove which geometry is actually on screen.
+    window.__wrField = field;
     window.__wrCapture = {
       fit(bbox) {
         camera.cx = (bbox[0] + bbox[2]) / 2;
@@ -1343,6 +1384,15 @@ async function initApp() {
       },
       setSpeed(speed) {
         applySpeed(speed);
+      },
+      // Runtime A/B for the colour-mode comparison. Clears the field so the
+      // next frame is drawn wholly in the new mode rather than compositing
+      // over stamps accumulated under the previous one.
+      setColourMode(mode) {
+        if (!COLOUR_MODES.includes(mode)) throw new Error(`unknown colour mode: ${mode}`);
+        state.colourMode = mode;
+        resetModeScratch();
+        field.clearField();
       },
     };
   }
@@ -1564,10 +1614,35 @@ async function initApp() {
     const it = new Float32Array(cap); it.set(modeIntens[m]); modeIntens[m] = it;
   }
 
+  // ---- Overlap-mode scratch ------------------------------------------------
+  // Same discipline as the per-mode buffers above (allocate once, explicit
+  // cursor, grow by doubling, never shrink). Bucketed by OVERLAP CLASS -- how
+  // many distinct modes serve the edge (1..4) -- not by mode, so every batch is
+  // homogeneous in class and one uniform colour is truthful for it. Only
+  // populated while state.colourMode === "overlap"; otherwise it stays at its
+  // initial allocation and costs nothing per frame.
+  const OVERLAP_N = 4;
+  const overlapSegs = Array.from({ length: OVERLAP_N }, () => new Float32Array(segCap * 2));
+  const overlapDelays = Array.from({ length: OVERLAP_N }, () => new Float32Array(segCap));
+  const overlapAges = Array.from({ length: OVERLAP_N }, () => new Float32Array(segCap));
+  const overlapIntens = Array.from({ length: OVERLAP_N }, () => new Float32Array(segCap));
+  const overlapCount = new Uint32Array(OVERLAP_N);
+
+  function ensureOverlapCap(c, needVerts) {
+    if (needVerts <= overlapDelays[c].length) return;
+    let cap = overlapDelays[c].length;
+    while (cap < needVerts) cap *= 2;
+    const s = new Float32Array(cap * 2); s.set(overlapSegs[c]); overlapSegs[c] = s;
+    const d = new Float32Array(cap); d.set(overlapDelays[c]); overlapDelays[c] = d;
+    const a = new Float32Array(cap); a.set(overlapAges[c]); overlapAges[c] = a;
+    const it = new Float32Array(cap); it.set(overlapIntens[c]); overlapIntens[c] = it;
+  }
+
   // Reset all write indices. Replaces the three `for (const arr of ...)
   // arr.length = 0` loops -- the buffers are retained, only the cursor moves.
   function resetModeScratch() {
     modeCount.fill(0);
+    overlapCount.fill(0);
   }
 
   // ---- Life scratch buffers (Task 4) --------------------------------------
@@ -1887,6 +1962,12 @@ async function initApp() {
   // nests entirely inside Espoo's), not WHETHER to stamp it.
   function pushEdge(segArr, mode, k, age) {
     const edgeIdx = stampEdge[k];
+    // Colour-mode gate. Under "identity" a shared edge is drawn ONCE, by the
+    // highest-capacity mode present, so additive accumulation can never sum two
+    // hues into a colour that names no mode (measured: 27% of lit edges carry
+    // 2+ modes). Every other mode simply skips the edge -- it is not dimmed or
+    // blended, it is not drawn, which is what keeps the surviving hue pure.
+    if (state.colourMode === "identity" && edgeWinner && edgeWinner[edgeIdx] !== mode) return;
     const base = 4 * edgeIdx;
     const ax = segArr[base], ay = segArr[base + 1];
     const bx = segArr[base + 2], by = segArr[base + 3];
@@ -1902,28 +1983,39 @@ async function initApp() {
           (ay < cs && by < cs) || (ay > cn && by > cn)) return;
     }
 
-    const n = modeCount[mode];
-    ensureModeCap(mode, n + 2);            // 2 vertices per edge
+    // Overlap mode writes into the class-bucketed scratch instead of the
+    // per-mode scratch; everything below is otherwise identical, so the two
+    // colour modes share one projection/delay/intensity path and cannot drift.
+    const ov = state.colourMode === "overlap";
+    const slot = ov ? Math.min(OVERLAP_N, Math.max(1, edgeModeN[edgeIdx] || 1)) - 1 : mode;
+    const segs = ov ? overlapSegs : modeSegs;
+    const delays = ov ? overlapDelays : modeDelays;
+    const ages = ov ? overlapAges : modeAges;
+    const intens = ov ? overlapIntens : modeIntens;
+    const counts = ov ? overlapCount : modeCount;
+
+    const n = counts[slot];
+    if (ov) ensureOverlapCap(slot, n + 2); else ensureModeCap(slot, n + 2); // 2 verts/edge
     // state.proj is introProj (top-cropped) during the guided intro, else the
     // free camera -- project through whichever is live, exactly as before.
     const cam = state.proj.cam;
     if (cam) {
-      projectInto(cam, ax, ay, modeSegs[mode], n * 2);
-      projectInto(cam, bx, by, modeSegs[mode], n * 2 + 2);
+      projectInto(cam, ax, ay, segs[slot], n * 2);
+      projectInto(cam, bx, by, segs[slot], n * 2 + 2);
     } else {
       // introProj has no `cam` -- fall back to the allocating path. The intro
       // is a paused, bounded snapshot, so its allocation cost is irrelevant.
       const [pax, pay] = state.proj.fn(ax, ay);
       const [pbx, pby] = state.proj.fn(bx, by);
-      modeSegs[mode][n * 2] = pax; modeSegs[mode][n * 2 + 1] = pay;
-      modeSegs[mode][n * 2 + 2] = pbx; modeSegs[mode][n * 2 + 3] = pby;
+      segs[slot][n * 2] = pax; segs[slot][n * 2 + 1] = pay;
+      segs[slot][n * 2 + 2] = pbx; segs[slot][n * 2 + 3] = pby;
     }
     const delay = stampDelay[k];
-    modeDelays[mode][n] = delay; modeDelays[mode][n + 1] = delay;
-    modeAges[mode][n] = age;     modeAges[mode][n + 1] = age;
+    delays[slot][n] = delay; delays[slot][n + 1] = delay;
+    ages[slot][n] = age;     ages[slot][n + 1] = age;
     const inten = normalizeStampIntensity(stampIntensity[k], MAX_MODE_WEIGHT);
-    modeIntens[mode][n] = inten; modeIntens[mode][n + 1] = inten;
-    modeCount[mode] = n + 2;
+    intens[slot][n] = inten; intens[slot][n + 1] = inten;
+    counts[slot] = n + 2;
   }
 
   // Resolve a stop's city street-buffer + mode. Returns null if this stop
@@ -1966,6 +2058,24 @@ async function initApp() {
   // grouped by mode (one draw call per mode, additive blend). Shared by
   // the rAF loop and the scripted intro (seedStopRipple).
   function flushStamps(params = RIPPLE_PARAMS) {
+    // Overlap mode re-colours the SAME per-mode batches by how many distinct
+    // modes serve each edge. The geometry is untouched -- only the uniform
+    // colour changes -- so this costs one extra draw call per (mode, class)
+    // pair and no additional buffer traffic. Edges are already grouped by mode,
+    // and an edge's class is fixed for the bundle, so a stable per-mode class
+    // split is enough; no re-sorting per frame.
+    if (state.colourMode === "overlap") {
+      // Edges are bucketed by OVERLAP CLASS (1..4 distinct modes) rather than by
+      // mode -- pushEdge routes into overlapSegs when this mode is active, so a
+      // batch is homogeneous in class and one uniform colour is truthful for it.
+      for (let c = 0; c < OVERLAP_N; c++) {
+        const n = overlapCount[c];
+        if (n === 0) continue;
+        field.stamp(overlapSegs[c], overlapDelays[c], overlapAges[c],
+                    overlapColour(c + 1), params, n, overlapIntens[c]);
+      }
+      return;
+    }
     for (let m = 0; m < MODE_N; m++) {
       const n = modeCount[m];
       if (n === 0) continue;
@@ -2229,6 +2339,10 @@ async function initApp() {
     // snapshot stays lit while paused); only sim-time advancement and event
     // activation are gated on dtSim > 0 below.
     field.clearField();
+
+    // Persistent network silhouette first; animated ripples and dots retain
+    // visual priority because every later pass additively draws over it.
+    field.drawCorridors(state.proj, corridorColors, corridorWidth, corridorBrightness);
 
     resetModeScratch();
 

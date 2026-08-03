@@ -179,6 +179,24 @@ precision highp float; in vec4 vCol; out vec4 o;
 void main(){ vec2 d = gl_PointCoord - vec2(0.5); float r = length(d);
   float a = smoothstep(0.5, 0.0, r); o = vec4(vCol.rgb * a * vCol.a, a * vCol.a); }`;
 
+const CORRIDOR_VS = `#version 300 es
+in vec2 a; in vec2 b;
+uniform vec2 projScale, projOffset, res; uniform float width;
+void main(){
+  const vec2 corners[6] = vec2[6](
+    vec2(0.0,-1.0), vec2(0.0,1.0), vec2(1.0,-1.0),
+    vec2(1.0,-1.0), vec2(0.0,1.0), vec2(1.0,1.0));
+  vec2 corner=corners[gl_VertexID];
+  vec2 pa=a*projScale+projOffset, pb=b*projScale+projOffset;
+  vec2 d=pb-pa; float len=max(length(d),0.0001);
+  vec2 normal=vec2(-d.y,d.x)/len;
+  vec2 p=mix(pa,pb,corner.x)+normal*corner.y*width*0.5;
+  vec2 c=(p/res)*2.0-1.0; gl_Position=vec4(c.x,-c.y,0.0,1.0);
+}`;
+const CORRIDOR_FS = `#version 300 es
+precision highp float; uniform vec3 color; uniform float brightness; out vec4 o;
+void main(){ o=vec4(color*brightness,brightness); }`;
+
 function compile(gl, vs, fs) {
   const p = gl.createProgram();
   for (const [t, src] of [[gl.VERTEX_SHADER, vs], [gl.FRAGMENT_SHADER, fs]]) {
@@ -200,6 +218,7 @@ export class RippleField {
     this.presentP = compile(gl, QUAD_VS, PRESENT_FS);
     this.stampP = compile(gl, STAMP_VS, STAMP_FS);
     this.pointP = compile(gl, POINT_VS, POINT_FS);
+    this.corridorP = compile(gl, CORRIDOR_VS, CORRIDOR_FS);
     this.quad = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.quad);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
@@ -208,6 +227,7 @@ export class RippleField {
     this.delayBuf = gl.createBuffer(); this.ageBuf = gl.createBuffer();
     this.intenBuf = gl.createBuffer();
     this.ptBuf = gl.createBuffer(); this.ptColBuf = gl.createBuffer();
+    this.corridorBuf = gl.createBuffer(); this.corridorBatches = [];
     this._segCap = 0; this._delayCap = 0; this._ageCap = 0; this._intenCap = 0;
 
     // Task 12 perf gate: cache all uniform/attribute locations ONCE per
@@ -247,6 +267,16 @@ export class RippleField {
       size: gl.getUniformLocation(this.pointP, "size"),
       p:    gl.getAttribLocation(this.pointP, "p"),
       col:  gl.getAttribLocation(this.pointP, "col"),
+    };
+    this.corridorLoc = {
+      projScale: gl.getUniformLocation(this.corridorP, "projScale"),
+      projOffset: gl.getUniformLocation(this.corridorP, "projOffset"),
+      res: gl.getUniformLocation(this.corridorP, "res"),
+      width: gl.getUniformLocation(this.corridorP, "width"),
+      color: gl.getUniformLocation(this.corridorP, "color"),
+      brightness: gl.getUniformLocation(this.corridorP, "brightness"),
+      a: gl.getAttribLocation(this.corridorP, "a"),
+      b: gl.getAttribLocation(this.corridorP, "b"),
     };
   }
   _alloc(w, h) {
@@ -365,6 +395,39 @@ export class RippleField {
     gl.enableVertexAttribArray(loc.col); gl.vertexAttribPointer(loc.col, 4, gl.FLOAT, false, 0, 0);
     gl.drawArrays(gl.POINTS, 0, pointsXY.length / 2);
   }
+  setCorridors(vertices, batches) {
+    const gl = this.gl;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.corridorBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+    this.corridorBatches = batches;
+  }
+  drawCorridors(projection, colors, widthForWeight, brightnessForWeight) {
+    if (!this.corridorBatches.length) return;
+    const gl = this.gl, loc = this.corridorLoc;
+    const p0 = projection.fn(0, 0), p1 = projection.fn(1, 1);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo[this.cur]); gl.viewport(0, 0, this.w, this.h);
+    gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE); gl.useProgram(this.corridorP);
+    gl.uniform2f(loc.projScale, p1[0]-p0[0], p1[1]-p0[1]);
+    gl.uniform2f(loc.projOffset, p0[0], p0[1]); gl.uniform2f(loc.res, this.w, this.h);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.corridorBuf);
+    const stride = 4 * 4;
+    for (const attr of [loc.a, loc.b]) {
+      gl.enableVertexAttribArray(attr);
+      gl.vertexAttribDivisor(attr, 1);
+    }
+    for (const batch of this.corridorBatches) {
+      const color = colors[batch.mode]; if (!color) continue;
+      const offset = batch.first * stride;
+      gl.vertexAttribPointer(loc.a,2,gl.FLOAT,false,stride,offset);
+      gl.vertexAttribPointer(loc.b,2,gl.FLOAT,false,stride,offset + 8);
+      gl.uniform3fv(loc.color,color); gl.uniform1f(loc.width,widthForWeight(batch.weight));
+      gl.uniform1f(loc.brightness,brightnessForWeight(batch.weight));
+      gl.drawArraysInstanced(gl.TRIANGLES,0,6,batch.count);
+    }
+    // Attribute divisors are global WebGL state; later ripple programs reuse
+    // these numeric slots for ordinary per-vertex attributes.
+    gl.vertexAttribDivisor(loc.a, 0); gl.vertexAttribDivisor(loc.b, 0);
+  }
   clearField() {
     const gl = this.gl;
     for (const f of this.fbo) { gl.bindFramebuffer(gl.FRAMEBUFFER, f); gl.clear(gl.COLOR_BUFFER_BIT); }
@@ -373,8 +436,8 @@ export class RippleField {
   // dispose — release every GL object this field allocated, so a city switch
   // (world-ripples Phase B re-entrant boot) doesn't leak a full set of
   // programs/buffers/textures per switch. Frees EXACTLY what is created here:
-  //   - 4 programs (decayP, presentP, stampP, pointP), compiled in the ctor
-  //   - 7 buffers (quad + segBuf/intBuf/delayBuf/ageBuf + ptBuf/ptColBuf)
+  //   - 5 programs (decayP, presentP, stampP, pointP, corridorP), compiled in the ctor
+  //   - 8 buffers (quad + segBuf/intBuf/delayBuf/ageBuf + ptBuf/ptColBuf + corridorBuf)
   //   - 2 textures + 2 framebuffers, allocated by _alloc (re-run on resize)
   // Shader objects themselves are not tracked: compile() attaches them and
   // never keeps a handle, so they are already flagged for deletion by the
@@ -386,16 +449,16 @@ export class RippleField {
   dispose() {
     const gl = this.gl;
     if (!gl) return;
-    for (const p of [this.decayP, this.presentP, this.stampP, this.pointP]) {
+    for (const p of [this.decayP, this.presentP, this.stampP, this.pointP, this.corridorP]) {
       if (p) gl.deleteProgram(p);
     }
-    this.decayP = this.presentP = this.stampP = this.pointP = null;
+    this.decayP = this.presentP = this.stampP = this.pointP = this.corridorP = null;
     for (const b of [this.quad, this.segBuf, this.intBuf, this.delayBuf,
-                     this.ageBuf, this.ptBuf, this.ptColBuf]) {
+                     this.ageBuf, this.ptBuf, this.ptColBuf, this.corridorBuf]) {
       if (b) gl.deleteBuffer(b);
     }
     this.quad = this.segBuf = this.intBuf = this.delayBuf =
-      this.ageBuf = this.ptBuf = this.ptColBuf = null;
+      this.ageBuf = this.ptBuf = this.ptColBuf = this.corridorBuf = null;
     this._segCap = 0; this._delayCap = 0; this._ageCap = 0;
     if (this.tex) for (const t of this.tex) gl.deleteTexture(t);
     if (this.fbo) for (const f of this.fbo) gl.deleteFramebuffer(f);
