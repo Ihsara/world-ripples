@@ -13,23 +13,23 @@
 // vehicle dots are interpolated in JS at playback (Option A) and impact dots
 // flash at a stop the instant its event fires.
 
-import { loadAll, makeCityCache } from "./data.js?v=6c0489b20a";
-import { loadLife } from "./life.js?v=6c0489b20a";
-import { cellAlpha, precomputeDeaths, precomputeLastMode } from "./lifeview.js?v=6c0489b20a";
+import { loadAll, makeCityCache } from "./data.js?v=59b61bc8eb";
+import { loadLife } from "./life.js?v=59b61bc8eb";
+import { cellAlpha, precomputeDeaths, precomputeLastMode } from "./lifeview.js?v=59b61bc8eb";
 import { makeProjection, eventsInWindow, RippleField, realAge, clampSkip,
          rippleLifeHorizon, nextEventInView, whisperText,
-         normalizeStampIntensity } from "./field.js?v=6c0489b20a";
-import { vehiclePosition } from "./vehicles.js?v=6c0489b20a";
+         normalizeStampIntensity } from "./field.js?v=59b61bc8eb";
+import { vehiclePosition } from "./vehicles.js?v=59b61bc8eb";
 import { deriveCorridorWeights, buildCorridorGeometry, corridorWidth,
          corridorBrightness, edgeModeCounts, overlapColour, MODE_RANK,
-         COLOUR_MODES } from "./corridors.js?v=6c0489b20a";
-import { lifeSimSec, vehicleStyleFor } from "./lifevehicles.js?v=6c0489b20a";
+         COLOUR_MODES } from "./corridors.js?v=59b61bc8eb";
+import { lifeSimSec, vehicleStyleFor } from "./lifevehicles.js?v=59b61bc8eb";
 import { createCamera, cameraProjection, panBy, zoomAboutPoint, resizeCamera,
          startFlyTo, stepFlyTo, visibleBbox, viewWidthKm, projectInto,
-         inflateBbox, fitBboxScale } from "./camera.js?v=6c0489b20a";
-import { createPlacePanel } from "./panel.js?v=6c0489b20a";
-import { findById, flattenTree } from "./places.js?v=6c0489b20a";
-import { loadCities, resolveSlug } from "./cities.js?v=6c0489b20a";
+         inflateBbox, fitBboxScale } from "./camera.js?v=59b61bc8eb";
+import { createPlacePanel } from "./panel.js?v=59b61bc8eb";
+import { findById, flattenTree } from "./places.js?v=59b61bc8eb";
+import { loadCities, resolveSlug } from "./cities.js?v=59b61bc8eb";
 
 // ---- AOI bboxes (lon/lat), mirrored from src/region.py EXACTLY -----------
 // Helsinki-specific subareas (fly-to chips + the guided intro's zoomed-in
@@ -62,7 +62,25 @@ const MODE_COLORS = [
 // Phase B: the bundle root holds cities.json plus one directory per city
 // slug, so the per-city data dir is DERIVED from the active slug rather than
 // being a single fixed path.
-const DATA_ROOT = "./data";
+//
+// PRIVATE TIERS: the private page (index-private.html) serves the same app off
+// the 600 s / 900 s bundles by setting `window.__wrDataRoot` in a CLASSIC
+// script BEFORE this module loads.
+//
+// Why a pre-set global and not an exported setter: initApp() runs at IMPORT
+// time (see the boot guard at the foot of this file), so anything importing
+// app.js and then calling a setter is already too late — the registry fetch has
+// begun against ./data. Reading the value here, at module-eval, is the only
+// ordering that cannot race.
+//
+// Deliberately read ONCE and never reassigned: a live mid-session change would
+// leave half a city's .bin files fetched from one horizon and half from
+// another. Switching tiers is a page navigation, which reuses boot()'s existing
+// fetch-then-teardown path rather than inventing a second one.
+const DATA_ROOT =
+  (typeof window !== "undefined" && typeof window.__wrDataRoot === "string" && window.__wrDataRoot)
+    ? window.__wrDataRoot
+    : "./data";
 const dataDirFor = (slug) => `${DATA_ROOT}/${slug}`;
 const SPAWN_BUDGET = 200; // max stamped events per frame, even at 300x
 
@@ -555,6 +573,17 @@ async function initApp() {
   const streets = d.streets;
   const stops = d.stops; // flat [x0,y0, x1,y1, ...] per stop (lon/lat)
   const horizonSec = manifest.horizon_sec;
+
+  // Publish the LOADED horizon for the private tier bar. It must come from the
+  // manifest, never from ?tier=: the URL states an intent, the manifest states
+  // what actually got fetched. If those ever disagree (a stale bundle, a
+  // hand-edited link, a tier that was never baked), the honesty line has to
+  // follow the bytes on screen — otherwise the page captions itself wrongly,
+  // which is the exact failure this whole tier UI exists to prevent.
+  // Reassigned on every city switch, so it tracks the live session.
+  if (typeof window !== "undefined") {
+    window.__wrManifest = { horizon_sec: horizonSec, slug };
+  }
 
   // Capacity constant for un-quantizing stampIntensity (Task 3 fix round 1).
   // `cp.max_mode_weight` is the SAME divisor bake_ripples.py used to
