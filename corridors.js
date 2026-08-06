@@ -9,8 +9,29 @@ export function deriveCorridorWeights(manifest, stopMode, stampIndex, stampInten
     const mode = stopMode[stop], off = stampIndex[2 * stop], count = stampIndex[2 * stop + 1];
     for (let k = off; k < off + count; k++) peaks[mode] = Math.max(peaks[mode], stampIntensity[k]);
   }
+  // The reference mode may have NO stops in this city. Tokyo is the Toei
+  // subway/tram feed and carries no buses at all, while every city's config
+  // sets reference_mode="bus".
+  //
+  // Why the `|| 1` fallback silently broke Tokyo: these weights are only ever
+  // consumed as `corridorWidth = 0.9 + log2(max(1, w))`, so a weight at or
+  // below 1 renders at the 0.9 px floor. Anchoring on bus works everywhere
+  // else because bus is the WEAKEST mode -- it becomes 1.0 and every richer
+  // mode ramps above it (helsinki: metro 10, train 6.25, tram 2.5, bus 1 ->
+  // 4.22/3.54/2.22/0.90 px). With the anchor missing, Tokyo's peaks divide by
+  // 1 and land at metro 1, train 0.625, tram 0.25 -- all at or under the
+  // floor, so every Tokyo corridor drew at 0.90 px and the capacity signal
+  // vanished entirely.
+  //
+  // So the fallback must anchor on the WEAKEST present mode, not the
+  // strongest: that reproduces bus's structural role and keeps the ramp. (An
+  // earlier attempt at max(peaks) is wrong for the same reason `|| 1` is --
+  // it normalizes the busiest mode to 1.0 and pushes the rest below the
+  // floor.)
   const refCode = modeCodes[capacity.reference_mode || "bus"];
-  const refPeak = peaks[refCode] || 1;
+  const present = Array.from(peaks).filter(p => p > 0);
+  const minPeak = present.length ? Math.min(...present) : 0;
+  const refPeak = peaks[refCode] || minPeak || 1;
   return Object.fromEntries(Object.entries(modeCodes).map(([mode, code]) =>
     [mode, peaks[code] ? peaks[code] / refPeak : 1]));
 }
