@@ -13,23 +13,23 @@
 // vehicle dots are interpolated in JS at playback (Option A) and impact dots
 // flash at a stop the instant its event fires.
 
-import { loadAll, makeCityCache } from "./data.js?v=4450ea038f";
-import { loadLife } from "./life.js?v=4450ea038f";
-import { cellAlpha, precomputeDeaths, precomputeLastMode } from "./lifeview.js?v=4450ea038f";
+import { loadAll, makeCityCache } from "./data.js?v=3abff76c3a";
+import { loadLife } from "./life.js?v=3abff76c3a";
+import { cellAlpha, precomputeDeaths, precomputeLastMode } from "./lifeview.js?v=3abff76c3a";
 import { makeProjection, eventsInWindow, RippleField, realAge, clampSkip,
          rippleLifeHorizon, nextEventInView, whisperText,
-         normalizeStampIntensity } from "./field.js?v=4450ea038f";
-import { vehiclePosition } from "./vehicles.js?v=4450ea038f";
+         normalizeStampIntensity } from "./field.js?v=3abff76c3a";
+import { vehiclePosition } from "./vehicles.js?v=3abff76c3a";
 import { deriveCorridorWeights, buildCorridorGeometry, corridorWidth,
          corridorBrightness, edgeModeCounts, overlapColour, MODE_RANK,
-         COLOUR_MODES } from "./corridors.js?v=4450ea038f";
-import { lifeSimSec, vehicleStyleFor } from "./lifevehicles.js?v=4450ea038f";
+         COLOUR_MODES } from "./corridors.js?v=3abff76c3a";
+import { lifeSimSec, vehicleStyleFor } from "./lifevehicles.js?v=3abff76c3a";
 import { createCamera, cameraProjection, panBy, zoomAboutPoint, resizeCamera,
          startFlyTo, stepFlyTo, visibleBbox, viewWidthKm, projectInto,
-         inflateBbox, fitBboxScale } from "./camera.js?v=4450ea038f";
-import { createPlacePanel } from "./panel.js?v=4450ea038f";
-import { findById, flattenTree } from "./places.js?v=4450ea038f";
-import { loadCities, resolveSlug } from "./cities.js?v=4450ea038f";
+         inflateBbox, fitBboxScale } from "./camera.js?v=3abff76c3a";
+import { createPlacePanel } from "./panel.js?v=3abff76c3a";
+import { findById, flattenTree } from "./places.js?v=3abff76c3a";
+import { loadCities, resolveSlug } from "./cities.js?v=3abff76c3a";
 
 // ---- AOI bboxes (lon/lat), mirrored from src/region.py EXACTLY -----------
 // Helsinki-specific subareas (fly-to chips + the guided intro's zoomed-in

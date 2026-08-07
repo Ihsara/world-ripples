@@ -29,6 +29,51 @@ export function resolveSlug(registry, requested) {
   return registry.landing_default;
 }
 
+// ---- country filter -------------------------------------------------------
+// Pure helpers, no DOM, mirroring the places.js split so they unit-test under
+// plain node. The panel owns the chrome; these own the decisions.
+
+// Countries present in the registry, each with its city count, ordered by
+// display_name so the chip row is stable across bakes (cities.json is written
+// in slug order, which is NOT the order the chips read in).
+//
+// A city whose country is missing/blank is NOT dropped and NOT bucketed under a
+// guessed name — it lands in `null`, which countryChips() reports as "Other".
+// Silently hiding a city from the picker because a bake forgot a field would be
+// the same class of failure as Milan's 87% inert train stops: invisible.
+export function countriesOf(registry) {
+  const counts = new Map();
+  if (!registry || !Array.isArray(registry.cities)) return [];
+  for (const c of registry.cities) {
+    const key = (c.country || "").trim() || null;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([country, count]) => ({ country, count }))
+    .sort((a, b) => {
+      // "Other" sinks to the end; everything else is alphabetical.
+      if (a.country === null) return 1;
+      if (b.country === null) return -1;
+      return a.country.localeCompare(b.country);
+    });
+}
+
+// `country === null` means "All" and returns every city untouched.
+export function filterCities(registry, country) {
+  if (!registry || !Array.isArray(registry.cities)) return [];
+  if (!country) return registry.cities;
+  return registry.cities.filter((c) => ((c.country || "").trim() || null) === country);
+}
+
+// The filter is a VIEW, never a navigation side effect: picking a country must
+// not move the map. But a filter that hides the city you are looking at is
+// disorienting, so the active city's country is what the panel opens on.
+export function countryOfSlug(registry, slug) {
+  if (!registry || !Array.isArray(registry.cities)) return null;
+  const hit = registry.cities.find((c) => c.slug === slug);
+  return hit ? ((hit.country || "").trim() || null) : null;
+}
+
 export function renderPicker(el, registry, activeSlug, onSelect) {
   el.replaceChildren();
   // Same defensive posture as loadCities: a null/malformed registry must not

@@ -5,6 +5,7 @@
       "slug": "amsterdam",
       "display_name": "Amsterdam",
       "coverage_note": "OVapi national NL GTFS feed, clipped to the Amsterdam metro area",
+      "country": "Netherlands",
       "region_bbox": [
         4.72,
         52.28,
@@ -30,6 +31,7 @@
       "slug": "berlin",
       "display_name": "Berlin",
       "coverage_note": "VBB Berlin-Brandenburg GTFS feed, clipped to the Berlin metro area. Data: VBB Verkehrsverbund Berlin-Brandenburg GmbH (CC BY 4.0).",
+      "country": "Germany",
       "region_bbox": [
         13.09,
         52.34,
@@ -55,6 +57,7 @@
       "slug": "helsinki",
       "display_name": "Helsinki",
       "coverage_note": "HSL \u2014 complete Helsinki-region network",
+      "country": "Finland",
       "region_bbox": [
         24.4,
         60.05,
@@ -98,6 +101,7 @@
       "slug": "milan",
       "display_name": "Milan",
       "coverage_note": "Milan's public transport: metro (M1-M5), trams and buses from ATM, plus Trenord suburban rail. The S-lines serving Milan are complete; Trenord's longer regional R/RE services are shown only where they run near the city. Walking ripples are drawn across the Milan urban area, so the most distant S-line stations appear as arrivals without a walk ripple. Data (c) Comune di Milano / AMAT - ATM (CC BY 3.0 IT) and (c) Trenord (CC BY 4.0).",
+      "country": "Italy",
       "region_bbox": [
         8.4,
         45.0,
@@ -123,6 +127,7 @@
       "slug": "nyc",
       "display_name": "New York City",
       "coverage_note": "MTA New York City Transit subway (regular schedule) and Staten Island Railway; Long Island Rail Road; Metro-North Railroad; NYCT local bus for all five boroughs (Bronx, Brooklyn, Manhattan, Queens, Staten Island); MTA Bus Company. Rail-outage shuttle buses (GTFS route_type 711) are folded into the bus mode alongside classic local buses; the Staten Island Railway (route_type 2, ships inside the subway feed) is shown as train, not metro. NOTE ON TIME WINDOW: the other cities animate a four-hour morning window (06:00-10:00); New York animates a shorter 90-minute morning-rush slice (06:00-07:30), anchored at the same 06:00 start, because the full federated nine-feed network exceeds the 25 MiB size budget over the longer window. No stops, routes, modes or feeds are dropped \u2014 every one of the nine MTA operators is fully represented; only the span of time SHOWN is shorter than the other cities'. Data: Metropolitan Transportation Authority, https://www.mta.info/developers.",
+      "country": "United States",
       "region_bbox": [
         -74.26,
         40.49,
@@ -148,6 +153,7 @@
       "slug": "oslo",
       "display_name": "Oslo",
       "coverage_note": "Ruter's Oslo and Akershus GTFS feed, clipped to the Oslo metro area. T-bane, tram, bus and Oslofjord ferries. Data: Ruter, published via Entur (entur.org) under the Norwegian Licence for Open Government Data (NLOD).",
+      "country": "Norway",
       "region_bbox": [
         10.5,
         59.8,
@@ -170,9 +176,36 @@
       ]
     },
     {
+      "slug": "porto",
+      "display_name": "Porto",
+      "coverage_note": "Porto's public transport: the STCP city bus network and all seven Metro do Porto light-rail lines (A-F and Bx), including the B line's coastal run north to P\u00f3voa de Varzim. Suburban and regional trains are NOT included: CP's feed carries no licence permitting redistribution, so Porto's Campanh\u00e3 and S\u00e3o Bento rail services are absent from this map. Data from Porto Open Data (opendata.porto.digital), published by STCP and Metro do Porto under CC0 / Dom\u00ednio P\u00fablico.",
+      "country": "Portugal",
+      "region_bbox": [
+        -8.71,
+        41.09,
+        -8.5,
+        41.25
+      ],
+      "subareas": {
+        "Porto": [
+          -8.77,
+          41.078,
+          -8.455,
+          41.385
+        ]
+      },
+      "intro_bbox": [
+        -8.71,
+        41.09,
+        -8.5,
+        41.25
+      ]
+    },
+    {
       "slug": "tokyo",
       "display_name": "Tokyo",
       "coverage_note": "Toei network (Bureau of Transportation, Tokyo Metropolitan Government): the Asakusa, Mita, Shinjuku and \u014cedo subway lines, the Tokyo Sakura Tram (Toden Arakawa Line), and the Nippori-Toneri Liner. Tokyo Metro and JR East (including the Yamanote Line) are NOT shown: their data licences prohibit public redistribution of a derived product, whereas Toei's feed is CC BY 4.0. Data: Bureau of Transportation, Tokyo Metropolitan Government, via the Public Transportation Open Data Center (odpt.org), CC BY 4.0.",
+      "country": "Japan",
       "region_bbox": [
         139.6,
         35.56,
@@ -198,6 +231,7 @@
       "slug": "vienna",
       "display_name": "Vienna",
       "coverage_note": "Wiener Linien GTFS feed (Vienna city transit: U-Bahn, tram and bus). Data: Wiener Linien GmbH & Co KG via data.gv.at (CC BY 4.0).",
+      "country": "Austria",
       "region_bbox": [
         16.18,
         48.11,
@@ -223,6 +257,7 @@
       "slug": "warsaw",
       "display_name": "Warsaw",
       "coverage_note": "Warsaw's ZTM public transport network: metro (M1, M2), trams, buses and SKM commuter rail. Data by Zarzad Transportu Miejskiego w Warszawie (ZTM), GTFS build by Mikolaj Kuranowski (mkuran.pl); bus route shapes from OpenStreetMap.",
+      "country": "Poland",
       "region_bbox": [
         20.586,
         51.922,
@@ -248,6 +283,7 @@
       "slug": "zurich",
       "display_name": "Z\u00fcrich",
       "coverage_note": "Swiss national GTFS timetable, clipped to the Z\u00fcrich metro area. S-Bahn, tram, bus and lake boats; funiculars and aerial cableways are shown as rail. Data: Open data platform mobility Switzerland (opentransportdata.swiss), published by SBB on behalf of the Swiss Federal Office of Transport.",
+      "country": "Switzerland",
       "region_bbox": [
         8.4,
         47.3,

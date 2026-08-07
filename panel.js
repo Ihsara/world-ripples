@@ -7,10 +7,16 @@
 // CITY_ORDER = ["Helsinki","Espoo","Vantaa","Kauniainen"] made this panel
 // render nothing for Berlin even when Berlin had data.
 
-import { filterRows, flattenTree } from "./places.js?v=4450ea038f";
+import { filterRows, flattenTree } from "./places.js?v=3abff76c3a";
+import { countriesOf, countryOfSlug, filterCities } from "./cities.js?v=3abff76c3a";
 
 // Below this many rows a search box is noise rather than help.
 const SEARCH_MIN_ROWS = 15;
+
+// Below this many COUNTRIES the filter row is noise too -- with 3 countries the
+// chips are just a second, worse copy of the city row. Same judgement as
+// SEARCH_MIN_ROWS, applied to the axis above it.
+const COUNTRY_MIN = 4;
 
 export function createPlacePanel(rootEl, { tree, cities, activeSlug, onSelect,
                                            onCity, onHover, signal }) {
@@ -23,6 +29,7 @@ export function createPlacePanel(rootEl, { tree, cities, activeSlug, onSelect,
   rootEl.innerHTML =
     '<button id="dp-tab" type="button" aria-expanded="false" aria-controls="dp-body">Places</button>' +
     '<div id="dp-body" hidden>' +
+    '  <div id="dp-countries" role="group" aria-label="Filter cities by country" hidden></div>' +
     '  <div id="dp-cities" role="group" aria-label="City"></div>' +
     '  <input id="dp-search" type="search" placeholder="Search places" ' +
     '         aria-label="Search places" hidden>' +
@@ -31,6 +38,7 @@ export function createPlacePanel(rootEl, { tree, cities, activeSlug, onSelect,
 
   const tabEl = rootEl.querySelector("#dp-tab");
   const bodyEl = rootEl.querySelector("#dp-body");
+  const countriesEl = rootEl.querySelector("#dp-countries");
   const citiesEl = rootEl.querySelector("#dp-cities");
   const searchEl = rootEl.querySelector("#dp-search");
   const listEl = rootEl.querySelector("#dp-list");
@@ -43,15 +51,72 @@ export function createPlacePanel(rootEl, { tree, cities, activeSlug, onSelect,
     if (open) searchEl.focus();
   }, { signal });
 
-  for (const city of cities || []) {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "dp-cityswitch";
-    b.textContent = city.display_name;
-    b.classList.toggle("active", city.slug === activeSlug);
-    b.addEventListener("click", () => onCity(city.slug), { signal });
-    citiesEl.appendChild(b);
+  // `cities` arrives as a bare array from app.js; the country helpers take the
+  // registry SHAPE ({cities: [...]}), so wrap once rather than teaching every
+  // helper two input shapes.
+  const registry = { cities: cities || [] };
+  const countries = countriesOf(registry);
+
+  // Open on the active city's country so the filter never boots hiding the city
+  // currently on screen. Null = "All".
+  let country = countries.length >= COUNTRY_MIN
+    ? countryOfSlug(registry, activeSlug)
+    : null;
+
+  function renderCountries() {
+    countriesEl.textContent = "";
+    // With too few countries the row is noise -- and staying hidden means
+    // `country` is never read, so every city renders.
+    if (countries.length < COUNTRY_MIN) {
+      countriesEl.hidden = true;
+      return;
+    }
+    countriesEl.hidden = false;
+
+    const chip = (label, value, count) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "dp-country";
+      // A count of 1 is noise: with today's one-city-per-country roster every
+      // chip would read "Italy 1". Show the number only where it means
+      // something -- i.e. once a country actually holds more than one city.
+      b.textContent = count > 1 ? `${label} ${count}` : label;
+      const on = country === value;
+      b.classList.toggle("active", on);
+      b.setAttribute("aria-pressed", String(on));
+      b.addEventListener("click", () => {
+        // Re-clicking the active country clears it: the chips double as their
+        // own reset, so "All" is never the only way back.
+        country = country === value ? null : value;
+        renderCountries();
+        renderCities();
+      }, { signal });
+      countriesEl.appendChild(b);
+    };
+
+    // "All" always carries its total -- that number is the roster size, which
+    // is worth stating even at 1. Per-country counts are suppressed at 1 above.
+    chip(`All ${registry.cities.length}`, null, 0);
+    for (const { country: name, count } of countries) {
+      chip(name === null ? "Other" : name, name, count);
+    }
   }
+
+  function renderCities() {
+    citiesEl.textContent = "";
+    for (const city of filterCities(registry, country)) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "dp-cityswitch";
+      b.textContent = city.display_name;
+      b.classList.toggle("active", city.slug === activeSlug);
+      b.addEventListener("click", () => onCity(city.slug), { signal });
+      citiesEl.appendChild(b);
+    }
+  }
+
+  renderCountries();
+  renderCities();
 
   searchEl.hidden = rows.length < SEARCH_MIN_ROWS;
   searchEl.addEventListener("input", () => render(), { signal });
