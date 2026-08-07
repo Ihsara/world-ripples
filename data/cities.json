@@ -98,6 +98,32 @@
       ]
     },
     {
+      "slug": "madrid",
+      "display_name": "Madrid",
+      "coverage_note": "Madrid's public transport: all 13 Metro de Madrid lines, the four Metro Ligero light-rail lines, the EMT Madrid city bus network, and CRTM's urban bus services for the surrounding municipalities. TWO GAPS, both from the source data rather than from this map. Cercan\u00edas commuter rail is ABSENT: CRTM's feed for it contains no trips at all (10 routes and 97 stops, but an empty timetable, last published in August 2024), so there is nothing to animate. And the Metro timetable is DATED: CRTM last published its Metro feed in May 2025 and has not updated it since, while the bus and light-rail feeds are current to July 2026. The metro's lines, stations, frequencies and running times are complete and exactly as CRTM published them; only the timetable's vintage is older than the rest of the map. Line ML4, the Tranv\u00eda de Parla, is also not shown \u2014 it is a self-contained circular tram in Parla, some 20 km south, sharing no stops with the Madrid network. Powered by CRTM (https://www.crtm.es) and Powered by EMT de Madrid.",
+      "country": "Spain",
+      "region_bbox": [
+        -3.92,
+        40.27,
+        -3.44,
+        40.58
+      ],
+      "subareas": {
+        "Madrid": [
+          -3.92,
+          40.27,
+          -3.44,
+          40.58
+        ]
+      },
+      "intro_bbox": [
+        -3.92,
+        40.27,
+        -3.44,
+        40.58
+      ]
+    },
+    {
       "slug": "milan",
       "display_name": "Milan",
       "coverage_note": "Milan's public transport: metro (M1-M5), trams and buses from ATM, plus Trenord suburban rail. The S-lines serving Milan are complete; Trenord's longer regional R/RE services are shown only where they run near the city. Walking ripples are drawn across the Milan urban area, so the most distant S-line stations appear as arrivals without a walk ripple. Data (c) Comune di Milano / AMAT - ATM (CC BY 3.0 IT) and (c) Trenord (CC BY 4.0).",
