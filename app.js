@@ -13,23 +13,25 @@
 // vehicle dots are interpolated in JS at playback (Option A) and impact dots
 // flash at a stop the instant its event fires.
 
-import { loadAll, makeCityCache } from "./data.js?v=3abff76c3a";
-import { loadLife } from "./life.js?v=3abff76c3a";
-import { cellAlpha, precomputeDeaths, precomputeLastMode } from "./lifeview.js?v=3abff76c3a";
+import { loadAll, makeCityCache } from "./data.js?v=edd3cdbe99";
+import { loadLife } from "./life.js?v=edd3cdbe99";
+import { cellAlpha, precomputeDeaths, precomputeLastMode } from "./lifeview.js?v=edd3cdbe99";
 import { makeProjection, eventsInWindow, RippleField, realAge, clampSkip,
          rippleLifeHorizon, nextEventInView, whisperText,
-         normalizeStampIntensity } from "./field.js?v=3abff76c3a";
-import { vehiclePosition } from "./vehicles.js?v=3abff76c3a";
+         normalizeStampIntensity } from "./field.js?v=edd3cdbe99";
+import { vehiclePosition } from "./vehicles.js?v=edd3cdbe99";
 import { deriveCorridorWeights, buildCorridorGeometry, corridorWidth,
          corridorBrightness, edgeModeCounts, overlapColour, MODE_RANK,
-         COLOUR_MODES } from "./corridors.js?v=3abff76c3a";
-import { lifeSimSec, vehicleStyleFor } from "./lifevehicles.js?v=3abff76c3a";
+         COLOUR_MODES } from "./corridors.js?v=edd3cdbe99";
+import { lifeSimSec, vehicleStyleFor } from "./lifevehicles.js?v=edd3cdbe99";
 import { createCamera, cameraProjection, panBy, zoomAboutPoint, resizeCamera,
          startFlyTo, stepFlyTo, visibleBbox, viewWidthKm, projectInto,
-         inflateBbox, fitBboxScale } from "./camera.js?v=3abff76c3a";
-import { createPlacePanel } from "./panel.js?v=3abff76c3a";
-import { findById, flattenTree } from "./places.js?v=3abff76c3a";
-import { loadCities, resolveSlug } from "./cities.js?v=3abff76c3a";
+         inflateBbox, fitBboxScale } from "./camera.js?v=edd3cdbe99";
+import { createPlacePanel } from "./panel.js?v=edd3cdbe99";
+import { findById, flattenTree } from "./places.js?v=edd3cdbe99";
+import { loadCities, resolveSlug } from "./cities.js?v=edd3cdbe99";
+import { exportFilename, capturePng, captureCommand, normalizeClock } from "./export.js?v=edd3cdbe99";
+import { CHROME_OVERLAY_IDS } from "./chrome.js?v=edd3cdbe99";
 
 // ---- AOI bboxes (lon/lat), mirrored from src/region.py EXACTLY -----------
 // Helsinki-specific subareas (fly-to chips + the guided intro's zoomed-in
@@ -953,9 +955,22 @@ async function initApp() {
     return visibleBbox(camera);
   }
 
+  // Set once the export row is wired (further down, where activeSlug and the
+  // clock label are both in scope). A null hook keeps every camera move above
+  // that point — the initial fit, in particular — from having to care.
+  //
+  // Two triggers, because the emitted capture command carries BOTH a --bbox
+  // (camera) and a --start (clock) and either can go stale on its own. The
+  // clock one is throttled to the displayed minute: the label is HH:MM, so
+  // re-rendering the command on every rAF would rebuild an identical string
+  // 60x a second.
+  let onCameraChanged = null;
+  let onClockChanged = null;
+
   function syncProjection() {
     state.proj = introProj || cameraProjection(camera);
     drawDistrictOutline();
+    if (onCameraChanged) onCameraChanged();
   }
 
   function fitProjection() {
@@ -2339,6 +2354,7 @@ async function initApp() {
       field.present();
 
       clockEl.textContent = lifeClockText();
+      if (onClockChanged) onClockChanged();
       if (!state.paused) updateScrubberFromT();
       maybeUpdateStatus(ts);
       session.rafHandle = requestAnimationFrame(frame);
@@ -2474,12 +2490,141 @@ async function initApp() {
     field.present();
 
     clockEl.textContent = formatClock(state.t);
+    if (onClockChanged) onClockChanged();
     if (!state.paused) updateScrubberFromT();
     maybeUpdateStatus(ts);
 
     session.rafHandle = requestAnimationFrame(frame);
   }
   session.rafHandle = requestAnimationFrame(frame);
+
+  // ---- PNG export of the current framing -----------------------------------
+  // THE ONE HARD CONSTRAINT: #map is a webgl2 context created WITHOUT
+  // preserveDrawingBuffer, so its colour buffer is only readable inside the
+  // same task as the draw that filled it. Read it one microtask later and
+  // toBlob returns a fully transparent/BLACK PNG and throws NOTHING.
+  //
+  // So the export does NOT call frame() as a draw callback. frame() is a rAF
+  // callback that reschedules ITSELF (`session.rafHandle = rAF(frame)`);
+  // invoking it by hand would double-schedule the loop and hand the next real
+  // frame a bogus dt. Instead we queue ONE rAF of our own. Callbacks queued
+  // for a given frame run in FIFO order, and the loop's next `frame` was
+  // queued at the end of the previous frame — i.e. BEFORE this one. So by the
+  // time our callback runs, `frame` has already executed its full draw and
+  // field.present() for THIS frame, and the buffer is live. We hide the chrome
+  // and call toBlob synchronously in that same callback: no await, no timer,
+  // no second rAF between the draw and the readback. The `draw` slot passed to
+  // capturePng is therefore a no-op — the real draw is the loop's own, which
+  // is the point.
+  const exportBtn = document.getElementById("export-png");
+  const captureCmdEl = document.getElementById("capture-cmd");
+  const captureCopyEl = document.getElementById("capture-cmd-copy");
+
+  // The bbox comes from the LIVE camera (visibleBbox), never from the selected
+  // place node: after a manual pan or zoom the node's bbox no longer describes
+  // what is on screen, and the emitted command would reproduce a framing the
+  // user is not looking at.
+  // #clock is a LABEL, not a clock: in Life mode it reads "Life…" /
+  // "Seed · 08:15" / "gen 3", and before the first frame it is index.html's
+  // literal "–". captureargs.mjs validates --start as HH:MM and throws on all
+  // of those, and exportFilename stripped them to an empty clock. So every
+  // consumer goes through normalizeClock, with formatClock(state.t) — the
+  // ripple-mode source of truth, always HH:MM — as the fallback.
+  function currentClock() {
+    return normalizeClock(clockEl.textContent, formatClock(state.t));
+  }
+  function currentCaptureCommand() {
+    return captureCommand({
+      slug: activeSlug,
+      bbox: visibleBbox(camera).map((v) => Number(v.toFixed(5))),
+      start: currentClock(),
+    });
+  }
+  function refreshCaptureCommand() {
+    if (captureCmdEl) captureCmdEl.textContent = currentCaptureCommand();
+  }
+  refreshCaptureCommand();
+  // Every camera move (pan, wheel, dblclick, fly-to step, resize) funnels
+  // through syncProjection, so the emitted --bbox never lags the viewport.
+  onCameraChanged = refreshCaptureCommand;
+  // ...and the clock advances on its own with no camera move at all, which is
+  // how the displayed --start froze at the boot time while the app played on.
+  // Rebuild only when the DISPLAYED minute actually changes.
+  let lastCmdClock = clockEl.textContent;
+  onClockChanged = () => {
+    if (clockEl.textContent === lastCmdClock) return;
+    lastCmdClock = clockEl.textContent;
+    refreshCaptureCommand();
+  };
+
+  if (exportBtn) {
+    exportBtn.addEventListener("click", () => {
+      // Snapshot the label BEFORE the frame runs: the clock in the filename
+      // must match the clock the command carries and the pixels we save.
+      const clockText = currentClock();
+      const placeName = state.district ? state.district.name : null;
+      const command = currentCaptureCommand();
+      exportBtn.disabled = true;
+
+      requestAnimationFrame(async () => {
+        // Restore EXACTLY what THIS export hid, not the whole id list and not
+        // "everything currently display:none". #mode-rail and #chrome both
+        // ship `hidden`, and #tierbar does not exist on the public page at
+        // all — blanket-clearing inline display would reveal an overlay that
+        // was legitimately hidden beforehand.
+        //
+        // So record each element's own prior inline display FIRST, and put
+        // exactly that value back. An element already inline-hidden before the
+        // click is restored to "none", not to visible. (hideChrome's return
+        // value names the ids it touched but not what they looked like before,
+        // and it is shared with capture.mjs — so the before-state is captured
+        // here rather than by changing that contract.)
+        const prior = new Map();
+        for (const id of CHROME_OVERLAY_IDS) {
+          const el = document.getElementById(id);
+          if (el) prior.set(id, el.style.display);
+        }
+        try {
+          const blob = await capturePng(canvas, document, () => {});
+          const name = exportFilename({
+            slug: activeSlug, place: placeName, clock: clockText });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = name;
+          a.click();
+          // Revoking synchronously after click() races the Chromium download,
+          // which can latch the blob a tick later and save nothing.
+          setTimeout(() => URL.revokeObjectURL(url), 0);
+          if (captureCmdEl) captureCmdEl.textContent = command;
+        } catch (err) {
+          console.error("PNG export failed", err);
+        } finally {
+          for (const [id, display] of prior) {
+            const el = document.getElementById(id);
+            if (el) el.style.display = display;
+          }
+          exportBtn.disabled = false;
+        }
+      });
+    }, { signal: abort.signal });
+  }
+
+  if (captureCopyEl) {
+    captureCopyEl.addEventListener("click", async () => {
+      const text = captureCmdEl ? captureCmdEl.textContent : "";
+      try {
+        await navigator.clipboard.writeText(text);
+        captureCopyEl.textContent = "Copied";
+      } catch {
+        // Clipboard API is origin/permission gated; the <code> is selectable
+        // and tabbable, so a manual copy is always available as the fallback.
+        captureCopyEl.textContent = "Select it";
+      }
+      setTimeout(() => { captureCopyEl.textContent = "Copy"; }, 1400);
+    }, { signal: abort.signal });
+  }
+
   return true;
   } // ---- end boot(slug) ----------------------------------------------------
 

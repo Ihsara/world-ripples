@@ -31,6 +31,30 @@ body { font: 15px/1.45 system-ui, sans-serif; color: #e8e8ec; background: #10142
 
 #scrubber { width: 100%; accent-color: #6fd3e6; }
 
+/* ---------- export row ----------
+   Lives inside #chrome (so hideChrome takes it out of its own capture) and
+   borrows the pill language of #transport's buttons so it reads as part of the
+   same bar rather than a bolted-on tool. The command itself is quiet, tabular
+   and selectable — it is reference text, not a control. */
+#export-row { display: flex; gap: 8px; align-items: center;
+  justify-content: center; flex-wrap: wrap; }
+#export-png, #capture-cmd-copy {
+  padding: 5px 12px; border: 1px solid #2a313d; background: rgba(16,20,32,.82);
+  color: #c7ccd6; border-radius: 999px; cursor: pointer; font: inherit;
+  font-size: 12px; transition: all .15s; white-space: nowrap;
+}
+#export-png:hover, #capture-cmd-copy:hover { border-color: #6fd3e6; color: #fff; }
+#export-png:focus-visible, #capture-cmd-copy:focus-visible,
+#capture-cmd:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+#export-png:disabled { opacity: .5; cursor: default; border-color: #2a313d; }
+#capture-cmd {
+  font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #7d8494; background: rgba(16,20,32,.6);
+  border: 1px solid #1e2430; border-radius: 6px; padding: 3px 8px;
+  user-select: all; max-width: min(56ch, 60vw);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
 #status { font: 11px monospace; color: #5b6270; }
 
 /* City-switch loading indicator. The old city keeps animating during a switch

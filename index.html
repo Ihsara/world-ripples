@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Cities, breathing in light</title><link rel="stylesheet" href="app.css?v=3abff76c3a"></head>
+<title>Cities, breathing in light</title><link rel="stylesheet" href="app.css?v=edd3cdbe99"></head>
 <body>
 <canvas id="map"></canvas>
 <canvas id="overlay"></canvas>
@@ -68,6 +68,18 @@
     <button id="speed-up" type="button" title="Faster" aria-label="Faster">▶▶</button>
     <button id="play-pause" aria-pressed="false" title="Pause (Space)" aria-label="Pause">⏸</button>
     <button id="skip-fwd" type="button" title="Forward 15 min" aria-label="Forward 15 minutes">+15m</button>
+  </div>
+  <!-- Export row. Deliberately INSIDE #chrome: "chrome" is one of
+       CHROME_OVERLAY_IDS, so hideChrome() takes this button off screen during
+       its own capture. A button parked outside the container would photograph
+       itself into every PNG — exactly the bug that list exists to prevent. -->
+  <div id="export-row">
+    <button id="export-png" type="button" title="Save this framing as a PNG"
+            aria-label="Save this framing as a PNG">Save PNG</button>
+    <code id="capture-cmd" tabindex="0"
+          aria-label="Headless capture command for this framing"></code>
+    <button id="capture-cmd-copy" type="button" title="Copy the capture command"
+            aria-label="Copy the capture command">Copy</button>
   </div>
   <!-- #utility wraps the three chips so a narrow viewport can lay them out as
        ONE flex row inside the chrome column. On desktop the wrapper is
@@ -198,5 +210,5 @@
      part of the interface. -->
 <div id="status" hidden></div>
 <div id="loading" hidden>Loading…</div>
-<script type="module" src="app.js?v=3abff76c3a"></script>
+<script type="module" src="app.js?v=edd3cdbe99"></script>
 </body></html>

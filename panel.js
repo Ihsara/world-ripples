@@ -7,8 +7,8 @@
 // CITY_ORDER = ["Helsinki","Espoo","Vantaa","Kauniainen"] made this panel
 // render nothing for Berlin even when Berlin had data.
 
-import { filterRows, flattenTree } from "./places.js?v=3abff76c3a";
-import { countriesOf, countryOfSlug, filterCities } from "./cities.js?v=3abff76c3a";
+import { filterRows, flattenTree, rankRows } from "./places.js?v=edd3cdbe99";
+import { countriesOf, countryOfSlug, filterCities } from "./cities.js?v=edd3cdbe99";
 
 // Below this many rows a search box is noise rather than help.
 const SEARCH_MIN_ROWS = 15;
@@ -20,7 +20,9 @@ const COUNTRY_MIN = 4;
 
 export function createPlacePanel(rootEl, { tree, cities, activeSlug, onSelect,
                                            onCity, onHover, signal }) {
-  const rows = flattenTree(tree);
+  // Ranked once here (not per keystroke in render()): filterRows() below is a
+  // stable subset of `rows`, so a search never disturbs the density order.
+  const rows = rankRows(flattenTree(tree));
 
   rootEl.hidden = false;
   // classList survives the innerHTML swap: a panel left open in city A would
