@@ -13,25 +13,27 @@
 // vehicle dots are interpolated in JS at playback (Option A) and impact dots
 // flash at a stop the instant its event fires.
 
-import { loadAll, makeCityCache } from "./data.js?v=edd3cdbe99";
-import { loadLife } from "./life.js?v=edd3cdbe99";
-import { cellAlpha, precomputeDeaths, precomputeLastMode } from "./lifeview.js?v=edd3cdbe99";
+import { loadAll, makeCityCache } from "./data.js?v=f32de640d8";
+import { loadLife } from "./life.js?v=f32de640d8";
+import { cellAlpha, precomputeDeaths, precomputeLastMode } from "./lifeview.js?v=f32de640d8";
 import { makeProjection, eventsInWindow, RippleField, realAge, clampSkip,
          rippleLifeHorizon, nextEventInView, whisperText,
-         normalizeStampIntensity } from "./field.js?v=edd3cdbe99";
-import { vehiclePosition } from "./vehicles.js?v=edd3cdbe99";
+         normalizeStampIntensity } from "./field.js?v=f32de640d8";
+import { vehiclePosition } from "./vehicles.js?v=f32de640d8";
 import { deriveCorridorWeights, buildCorridorGeometry, corridorWidth,
          corridorBrightness, edgeModeCounts, overlapColour, MODE_RANK,
-         COLOUR_MODES } from "./corridors.js?v=edd3cdbe99";
-import { lifeSimSec, vehicleStyleFor } from "./lifevehicles.js?v=edd3cdbe99";
+         COLOUR_MODES } from "./corridors.js?v=f32de640d8";
+import { lifeSimSec, vehicleStyleFor } from "./lifevehicles.js?v=f32de640d8";
 import { createCamera, cameraProjection, panBy, zoomAboutPoint, resizeCamera,
          startFlyTo, stepFlyTo, visibleBbox, viewWidthKm, projectInto,
-         inflateBbox, fitBboxScale } from "./camera.js?v=edd3cdbe99";
-import { createPlacePanel } from "./panel.js?v=edd3cdbe99";
-import { findById, flattenTree } from "./places.js?v=edd3cdbe99";
-import { loadCities, resolveSlug } from "./cities.js?v=edd3cdbe99";
-import { exportFilename, capturePng, captureCommand, normalizeClock } from "./export.js?v=edd3cdbe99";
-import { CHROME_OVERLAY_IDS } from "./chrome.js?v=edd3cdbe99";
+         inflateBbox, fitBboxScale } from "./camera.js?v=f32de640d8";
+import { createPlacePanel } from "./panel.js?v=f32de640d8";
+import { SEASONS } from "./solar.js?v=f32de640d8";
+import { makeSunState, parseSunLink } from "./sunstate.js?v=f32de640d8";
+import { findById, flattenTree } from "./places.js?v=f32de640d8";
+import { loadCities, resolveSlug } from "./cities.js?v=f32de640d8";
+import { exportFilename, capturePng, captureCommand, normalizeClock } from "./export.js?v=f32de640d8";
+import { CHROME_OVERLAY_IDS } from "./chrome.js?v=f32de640d8";
 
 // ---- AOI bboxes (lon/lat), mirrored from src/region.py EXACTLY -----------
 // Helsinki-specific subareas (fly-to chips + the guided intro's zoomed-in
@@ -406,6 +408,9 @@ async function initApp() {
   const modeRailEl = document.getElementById("mode-rail");
   const modeRipplesEl = document.getElementById("mode-ripples");
   const modeLifeEl = document.getElementById("mode-life");
+  const sunRailEl = document.getElementById("sun-rail");
+  const sunToggleEl = document.getElementById("sun-toggle");
+  const sunSeasonEls = document.querySelectorAll("#sun-seasons button[data-season]");
   const helpBtnEl = document.getElementById("help-btn");
   const creditsBtnEl = document.getElementById("credits-btn");
   const creditsEl = document.getElementById("credits");
@@ -501,6 +506,14 @@ async function initApp() {
   // once, at module scope beside bootSeq, so it survives across switches.
   const cityCache = makeCityCache(2);
 
+  // Sun state is a user CHOICE, not per-city page data, so it must survive a
+  // city switch the same way cityCache does: created once at module scope,
+  // read/written by boot() below. Starts null so the very first boot falls
+  // through to the ?sun=/?season= deep-link (or its defaults) unmodified;
+  // populated after the first boot so every SUBSEQUENT switch carries the
+  // user's last choice forward instead of silently reverting to the URL.
+  let sunPersist = null;
+
   // The active city's region_bbox (cities.json), or AOIS.region as a last
   // resort when the registry failed to load (no cities.json / malformed —
   // same defensive posture as resolveSlug/loadCities). AOIS.region IS
@@ -509,6 +522,23 @@ async function initApp() {
   function cameraBboxFor(slug) {
     const entry = cityEntry(slug);
     return (entry && entry.region_bbox) || AOIS.region;
+  }
+
+  // The centre is COMPUTED from region_bbox, never stored separately -- a
+  // duplicated centre drifts. utc_offset_hours is a 4-element array indexed
+  // by SEASONS order (mar/jun/sep/dec); falls back to all-zero (UTC) so a
+  // registry entry without the field still boots instead of throwing.
+  function buildSunState(slug, seasonKey) {
+    const entry = cityEntry(slug);
+    const bbox = (entry && entry.region_bbox) || AOIS.region;
+    const offsets = (entry && entry.utc_offset_hours) || [0, 0, 0, 0];
+    const idx = Math.max(0, SEASONS.findIndex((s) => s.key === seasonKey));
+    return makeSunState({
+      lat: (bbox[1] + bbox[3]) / 2,
+      lon: (bbox[0] + bbox[2]) / 2,
+      utcOffsetHours: offsets[idx],
+      seasonKey,
+    });
   }
 
   async function boot(slug) {
@@ -792,6 +822,9 @@ async function initApp() {
     // first-time visitor can land in — there is no ?mode= deep link, so the
     // landing experience is byte-identical to before this task.
     mode: "ripples",
+    sunEnabled: true,      // ON by default -- the user's explicit call
+    sunSeason: "mar",      // Mar 20 equinox: every city ~12.1h, so cities compare fairly
+    sun: null,             // makeSunState(...), rebuilt on city or season change
     lifePos: 0,        // float generation position, 0 .. nFrames-1
     lifeHoldSec: 0,    // wall-sec still owed to the generation-0 hold
     lifeLiveCells: 0,  // instrumentation only (#status + __wrLife)
@@ -803,6 +836,47 @@ async function initApp() {
     lifeVehicleDots: 0,     // dots stamped this frame (live gate reads this)
     lifeVehicleClipped: false, // true once VEHICLE_DOT_BUDGET truncated a frame
   };
+  // ?sun=off / ?season=<key> — parsed once at page load, beside the other
+  // deep-link params below, and applied here (rather than left to defaults)
+  // so the rail's initial button states can reflect them at boot. `state`
+  // itself is rebuilt fresh on every boot() (city switch included), the same
+  // way `state.mode` always resets to "ripples" on a switch — but unlike
+  // `state.mode`, the sun choice is explicitly CARRIED OVER a switch via
+  // `sunPersist` (module scope, above): only the first boot reads the URL;
+  // every later boot restores whatever the user last chose, so turning the
+  // sun off and then switching city does not silently turn it back on.
+  if (sunPersist) {
+    state.sunEnabled = sunPersist.sunEnabled;
+    state.sunSeason = sunPersist.sunSeason;
+  } else {
+    const sunLink = parseSunLink(new URLSearchParams(window.location.search));
+    state.sunEnabled = sunLink.sunEnabled;
+    state.sunSeason = sunLink.sunSeason;
+  }
+  sunPersist = { sunEnabled: state.sunEnabled, sunSeason: state.sunSeason };
+  // MUST run after state exists (state.sun is read/written by name below) and
+  // after the ?sun=/?season= link above resolves state.sunSeason. This used
+  // to sit before `const state = {...}`, which is a TDZ ReferenceError on
+  // every boot — the sun feature never actually rendered a frame; caught here
+  // while wiring the season buttons in Task 7.
+  state.sun = buildSunState(slug, state.sunSeason);
+  // Publish the RESOLVED sun state onto the same __wrManifest hook capture.mjs
+  // already reads horizon_sec from (see the assignment above). Getters, not a
+  // static snapshot, so a caller that reads this after the sun-rail toggle or
+  // a season click (state.sunEnabled/state.sunSeason can change post-boot —
+  // see the click handlers below) observes the CURRENT state, not the
+  // boot-time one. capture.mjs never clicks those controls, but the manifest
+  // must record what was actually shown, not what was assumed.
+  if (typeof window !== "undefined" && window.__wrManifest) {
+    Object.defineProperty(window.__wrManifest, "sun_enabled", {
+      configurable: true,
+      get: () => state.sunEnabled,
+    });
+    Object.defineProperty(window.__wrManifest, "sun_season", {
+      configurable: true,
+      get: () => state.sunSeason,
+    });
+  }
   // Deep-link params describe how the PAGE was opened, so they are applied
   // on the first boot only. Re-applying them on a city switch would yank the
   // clock/speed/framing back to the URL every time a chip is clicked, undoing
@@ -1327,12 +1401,67 @@ async function initApp() {
   if (modeRailEl) {
     modeRailEl.hidden = slug !== "helsinki";
   }
+  // Sunlight, unlike Life, applies to EVERY city (per-city latitude is the
+  // whole point) — unhide unconditionally rather than mirroring the
+  // Helsinki-only restriction above.
+  if (sunRailEl) {
+    sunRailEl.hidden = false;
+  }
   syncModeButtons();
   // #mode-history is deliberately given NO listener: it is `disabled`, so it
   // cannot be clicked or keyboard-activated, and a handler that called nothing
   // would just be dead code to trip over when the APC mode lands.
   modeRipplesEl?.addEventListener("click", () => { setMode("ripples"); }, { signal: abort.signal });
   modeLifeEl?.addEventListener("click", () => { setMode("life"); }, { signal: abort.signal });
+
+  // Sun rail: reflects state.sunEnabled/state.sunSeason, which may already be
+  // non-default here — either from ?sun=off / ?season=<key> on the FIRST
+  // boot, or (on any later boot) restored from `sunPersist`, which carries
+  // the user's last click across a city switch (see the state-construction
+  // block above). Sync the buttons to the CURRENT state rather than
+  // hardcoding the defaults.
+  if (sunToggleEl) {
+    sunToggleEl.classList.toggle("active", state.sunEnabled);
+    sunToggleEl.setAttribute("aria-pressed", String(state.sunEnabled));
+  }
+  if (sunRailEl) {
+    sunRailEl.dataset.sun = state.sunEnabled ? "on" : "off";
+  }
+  for (const b of sunSeasonEls) {
+    const on = b.dataset.season === state.sunSeason;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-pressed", String(on));
+  }
+  sunToggleEl?.addEventListener("click", () => {
+    state.sunEnabled = !state.sunEnabled;
+    // Keep the module-level carry-over in sync with the click, not just
+    // `state` — `state` itself is discarded on the next boot(), so if this
+    // choice isn't also written to `sunPersist` here it would still be lost
+    // on the very next city switch.
+    sunPersist = { sunEnabled: state.sunEnabled, sunSeason: state.sunSeason };
+    sunToggleEl.classList.toggle("active", state.sunEnabled);
+    sunToggleEl.setAttribute("aria-pressed", String(state.sunEnabled));
+    if (sunRailEl) sunRailEl.dataset.sun = state.sunEnabled ? "on" : "off";
+  }, { signal: abort.signal });
+  for (const btn of sunSeasonEls) {
+    btn.addEventListener("click", () => {
+      state.sunSeason = btn.dataset.season;
+      // Season is baked into the sun state object at construction time, so
+      // merely setting state.sunSeason would leave the visuals on the old
+      // season — the buttons would appear to do nothing. Rebuild it here,
+      // using the SAME slug this boot() call is building for (the `slug`
+      // parameter, not a nonexistent state.slug).
+      state.sun = buildSunState(slug, state.sunSeason);
+      // See the sunToggleEl handler above: persist the choice past this
+      // session so the next city switch does not revert it.
+      sunPersist = { sunEnabled: state.sunEnabled, sunSeason: state.sunSeason };
+      for (const b of sunSeasonEls) {
+        const on = b === btn;
+        b.classList.toggle("active", on);
+        b.setAttribute("aria-pressed", String(on));
+      }
+    }, { signal: abort.signal });
+  }
 
   function setPaused(p) {
     state.paused = p;
@@ -2351,7 +2480,17 @@ async function initApp() {
       field.clearField();
       updateCullBbox();
       drawLifeFrame();
-      field.present();
+      // Life's true civil time is lifeSimSec (t0_sec + (gen+frac)*stride_sec)
+      // -- the SAME value drawLifeVehicles() already uses to place vehicles
+      // and that lifeWallClock()/lifeClockText() format for the on-screen
+      // clock. state.t is a RIPPLE-mode concept (sim-seconds since
+      // dataMin) and is not advanced while in Life mode, so reusing it here
+      // would freeze the sun at whatever hour ripple mode was last showing.
+      const lifeCivilSec = lifeSimSec(state.lifePos, lifeNFrames(), session.lifeMeta);
+      const lifeSunBase = state.sun && lifeCivilSec !== null
+        ? state.sun.baseFor(((lifeCivilSec % 86400) + 86400) % 86400, state.sunEnabled)
+        : undefined;
+      field.present(lifeSunBase);
 
       clockEl.textContent = lifeClockText();
       if (onClockChanged) onClockChanged();
@@ -2487,7 +2626,11 @@ async function initApp() {
       if (pts.length) field.stampDots(Float32Array.from(pts), Float32Array.from(cols), 7.0);
     }
 
-    field.present();
+    // formatClock's own civil-seconds idiom (state.t + manifest.sim_origin_sec)
+    // -- wrapped to [0, 86400) because a sim window running past midnight
+    // would otherwise feed an out-of-range hour angle into solarElevation.
+    const civilSec = (state.t + manifest.sim_origin_sec) % 86400;
+    field.present(state.sun ? state.sun.baseFor(civilSec, state.sunEnabled) : undefined);
 
     clockEl.textContent = formatClock(state.t);
     if (onClockChanged) onClockChanged();

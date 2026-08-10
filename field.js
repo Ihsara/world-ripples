@@ -1,4 +1,5 @@
 // field.js — pure playback helpers (Task 6) + WebGL field (Task 7).
+import { DEFAULT_RGB } from "./sunlight.js?v=f32de640d8";
 export function makeProjection(bbox, w, h, margin) {
   const m = margin || 10;
   const latMid = (bbox.minY + bbox.maxY) / 2;
@@ -116,10 +117,11 @@ out vec4 o; void main(){ o = texture(tex, uv) * k; }`;
 const GLOW_STRENGTH = 2.2;
 const PRESENT_FS = `#version 300 es
 precision highp float; in vec2 uv; uniform sampler2D tex; uniform float glowStrength;
+uniform vec3 uBase;
 out vec4 o;
 void main(){
   vec4 s = texture(tex, uv);
-  vec3 base = vec3(0.063,0.078,0.125);
+  vec3 base = uBase;
   // log1p compression on the ACCUMULATED sum (Task 3 fix round 1, the
   // review's ruling): restoring stampIntensity's reference mode (bus) to
   // its true weight of 1.0 (see normalizeStampIntensity in this file, and
@@ -261,6 +263,7 @@ export class RippleField {
     this.presentLoc = {
       tex:          gl.getUniformLocation(this.presentP, "tex"),
       glowStrength: gl.getUniformLocation(this.presentP, "glowStrength"),
+      uBase:        gl.getUniformLocation(this.presentP, "uBase"),
     };
     this.pointLoc = {
       res:  gl.getUniformLocation(this.pointP, "res"),
@@ -465,7 +468,7 @@ export class RippleField {
     this.tex = null; this.fbo = null;
     this.gl = null;
   }
-  present() {
+  present(baseRgb) {
     const gl = this.gl, loc = this.presentLoc;
     gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, this.w, this.h);
     gl.disable(gl.BLEND);
@@ -473,6 +476,8 @@ export class RippleField {
     gl.useProgram(this.presentP);
     gl.uniform1i(loc.tex, 0);
     gl.uniform1f(loc.glowStrength, GLOW_STRENGTH);
+    // Omitted base == today's exact literal, so sun-off renders byte-identically.
+    gl.uniform3fv(loc.uBase, baseRgb || DEFAULT_RGB);
     this._drawQuad(this.presentP, this.quadLoc.present);
   }
 }

@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Cities, breathing in light</title><link rel="stylesheet" href="app.css?v=edd3cdbe99"></head>
+<title>Cities, breathing in light</title><link rel="stylesheet" href="app.css?v=f32de640d8"></head>
 <body>
 <canvas id="map"></canvas>
 <canvas id="overlay"></canvas>
@@ -33,6 +33,19 @@
     <span class="mr-label">History</span>
     <span class="mr-sub">soon</span>
   </button>
+</div>
+
+<!-- Lighting is not a mode: it applies in BOTH Ripples and Life, so it is a
+     separate group rather than a fourth mode-rail button. -->
+<div id="sun-rail" role="group" aria-label="Sunlight" hidden>
+  <button id="sun-toggle" type="button" class="active" aria-pressed="true"
+          title="Sunlight for this city's latitude">☀ Sun</button>
+  <div id="sun-seasons" role="group" aria-label="Season">
+    <button type="button" data-season="mar" class="active" aria-pressed="true">Mar</button>
+    <button type="button" data-season="jun" aria-pressed="false">Jun</button>
+    <button type="button" data-season="sep" aria-pressed="false">Sep</button>
+    <button type="button" data-season="dec" aria-pressed="false">Dec</button>
+  </div>
 </div>
 
 <div id="intro" role="dialog" aria-modal="true" aria-labelledby="intro-title">
@@ -210,5 +223,5 @@
      part of the interface. -->
 <div id="status" hidden></div>
 <div id="loading" hidden>Loading…</div>
-<script type="module" src="app.js?v=edd3cdbe99"></script>
+<script type="module" src="app.js?v=f32de640d8"></script>
 </body></html>

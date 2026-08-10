@@ -158,13 +158,36 @@ body { font: 15px/1.45 system-ui, sans-serif; color: #e8e8ec; background: #10142
    there and needs no extra rule. */
 #clock, #whisper { text-align: center; }
 
+/* ---------- sun rail: Sun toggle + Mar/Jun/Sep/Dec ----------
+   Same left-edge treatment as #mode-rail, offset below it so the two rails
+   stack rather than overlap. Unlike #mode-rail (Helsinki/Life-only), sunlight
+   applies to every city, so this rail is unhidden unconditionally in boot(). */
+#sun-rail {
+  position: fixed; left: 0; top: 50%; margin-top: 84px; z-index: 6;
+  display: flex; flex-direction: column; gap: 4px; padding: 6px;
+  background: rgba(14,18,30,.9); border: 1px solid #2a313d; border-left: none;
+  border-radius: 0 10px 10px 0;
+}
+#sun-rail button {
+  border: 1px solid #2a313d; background: rgba(16,20,32,.82); color: #c7ccd6;
+  border-radius: 7px; padding: 4px 10px; font: inherit; font-size: 12px; cursor: pointer;
+}
+#sun-rail button.active { background: #6fd3e6; color: #061014; border-color: #6fd3e6; font-weight: 600; }
+#sun-seasons { display: flex; gap: 3px; }
+#sun-seasons button { padding: 3px 6px; font-size: 11px; }
+#sun-rail[data-sun="off"] #sun-seasons { opacity: .38; pointer-events: none; }
+/* Same [hidden] specificity trap #mode-rail hits: the ID rule above would
+   otherwise beat the UA stylesheet's display:none. */
+#sun-rail[hidden] { display: none !important; }
+
 /* Idle-hide: in fullscreen the chrome gets out of the way and returns on move. */
 body.chrome-hidden #chrome,
 body.chrome-hidden #fullscreen-btn,
 body.chrome-hidden #help-btn,
 body.chrome-hidden #credits-btn,
 body.chrome-hidden #district-panel,
-body.chrome-hidden #mode-rail { opacity: 0; pointer-events: none;
+body.chrome-hidden #mode-rail,
+body.chrome-hidden #sun-rail { opacity: 0; pointer-events: none;
   transition: opacity .4s; }
 
 /* ---------- intro overlay + click-stepper ----------
