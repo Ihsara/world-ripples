@@ -13,27 +13,29 @@
 // vehicle dots are interpolated in JS at playback (Option A) and impact dots
 // flash at a stop the instant its event fires.
 
-import { loadAll, makeCityCache } from "./data.js?v=f32de640d8";
-import { loadLife } from "./life.js?v=f32de640d8";
-import { cellAlpha, precomputeDeaths, precomputeLastMode } from "./lifeview.js?v=f32de640d8";
+import { loadAll, makeCityCache } from "./data.js?v=f288c2c188";
+import { loadLife } from "./life.js?v=f288c2c188";
+import { cellAlpha, precomputeDeaths, precomputeLastMode } from "./lifeview.js?v=f288c2c188";
 import { makeProjection, eventsInWindow, RippleField, realAge, clampSkip,
          rippleLifeHorizon, nextEventInView, whisperText,
-         normalizeStampIntensity } from "./field.js?v=f32de640d8";
-import { vehiclePosition } from "./vehicles.js?v=f32de640d8";
+         normalizeStampIntensity } from "./field.js?v=f288c2c188";
+import { vehiclePosition } from "./vehicles.js?v=f288c2c188";
 import { deriveCorridorWeights, buildCorridorGeometry, corridorWidth,
          corridorBrightness, edgeModeCounts, overlapColour, MODE_RANK,
-         COLOUR_MODES } from "./corridors.js?v=f32de640d8";
-import { lifeSimSec, vehicleStyleFor } from "./lifevehicles.js?v=f32de640d8";
+         COLOUR_MODES } from "./corridors.js?v=f288c2c188";
+import { lifeSimSec, vehicleStyleFor } from "./lifevehicles.js?v=f288c2c188";
 import { createCamera, cameraProjection, panBy, zoomAboutPoint, resizeCamera,
          startFlyTo, stepFlyTo, visibleBbox, viewWidthKm, projectInto,
-         inflateBbox, fitBboxScale } from "./camera.js?v=f32de640d8";
-import { createPlacePanel } from "./panel.js?v=f32de640d8";
-import { SEASONS } from "./solar.js?v=f32de640d8";
-import { makeSunState, parseSunLink } from "./sunstate.js?v=f32de640d8";
-import { findById, flattenTree } from "./places.js?v=f32de640d8";
-import { loadCities, resolveSlug } from "./cities.js?v=f32de640d8";
-import { exportFilename, capturePng, captureCommand, normalizeClock } from "./export.js?v=f32de640d8";
-import { CHROME_OVERLAY_IDS } from "./chrome.js?v=f32de640d8";
+         inflateBbox, fitBboxScale } from "./camera.js?v=f288c2c188";
+import { createPlacePanel } from "./panel.js?v=f288c2c188";
+import { SEASONS } from "./solar.js?v=f288c2c188";
+import { makeSunState, parseSunLink } from "./sunstate.js?v=f288c2c188";
+import { desertAvailable, desertLabel, drawDeserts, rankSubareas,
+         unpackDesertBits } from "./deserts.js?v=f288c2c188";
+import { findById, flattenTree } from "./places.js?v=f288c2c188";
+import { loadCities, resolveSlug } from "./cities.js?v=f288c2c188";
+import { exportFilename, capturePng, captureCommand, normalizeClock } from "./export.js?v=f288c2c188";
+import { CHROME_OVERLAY_IDS } from "./chrome.js?v=f288c2c188";
 
 // ---- AOI bboxes (lon/lat), mirrored from src/region.py EXACTLY -----------
 // Helsinki-specific subareas (fly-to chips + the guided intro's zoomed-in
@@ -411,6 +413,7 @@ async function initApp() {
   const sunRailEl = document.getElementById("sun-rail");
   const sunToggleEl = document.getElementById("sun-toggle");
   const sunSeasonEls = document.querySelectorAll("#sun-seasons button[data-season]");
+  const modeDesertsEl = document.getElementById("mode-deserts");
   const helpBtnEl = document.getElementById("help-btn");
   const creditsBtnEl = document.getElementById("credits-btn");
   const creditsEl = document.getElementById("credits");
@@ -486,6 +489,15 @@ async function initApp() {
     s.life = null;
     s.lifePromise = null;
     s.lifeMeta = null;
+    // 4.6. Release the desert bitmaps, same contract as 4.5. One Uint8Array of
+    //    one byte per cell per subarea (~255 KB across the four Helsinki
+    //    subareas, ~84 KB for a single-subarea city) — small next to Life, but
+    //    it is still a per-city resource and nothing per-city may survive a
+    //    switch. The manifest goes too: it is what the rail's visibility rule
+    //    reads, and a stale one would describe the previous city's coverage.
+    s.deserts = null;
+    s.desertBits = null;
+    s.desertPromise = null;
     // 5. Drop the panel handle. Its listeners died with step 2; this stops the
     //    session object itself from pointing at the detached row elements.
     s.panel = null;
@@ -570,8 +582,32 @@ async function initApp() {
 
     const abort = new AbortController();
     const session = { rafHandle: null, abort, field: null, data: d, panel: null, idleTimer: null,
-                       life: null, lifePromise: null, lifeMeta: null };
+                       life: null, lifePromise: null, lifeMeta: null,
+                       deserts: null, desertBits: null, desertPromise: null };
     currentSession = session;
+
+  // The deserts MANIFEST is fetched eagerly, the BITMAPS are not. The rail's
+  // visibility rule below runs synchronously during boot and asks
+  // desertAvailable(session.deserts, ...) — so the tiny JSON (<1 KB, one per
+  // city) has to be in hand by then or every city would boot with the button
+  // disabled and only enable it after some later event that does not exist.
+  // The desert_<Sub>.bin files (the expensive half, 14 KB–88 KB per subarea)
+  // stay lazy in loadDesertsForSession, entered only when the mode is.
+  //
+  // A missing or malformed deserts.json is NOT an error: it means this city
+  // has no desert bake, and desertAvailable(null, ...) === false already says
+  // exactly that. So this swallows rather than throws — an unbaked city must
+  // still boot into Ripples.
+  try {
+    const resp = await fetch(`${dataDirFor(slug)}/deserts.json`);
+    if (resp.ok) session.deserts = await resp.json();
+  } catch (err) {
+    console.warn(`deserts: no manifest for '${slug}'`, err);
+  }
+  // A newer boot() can start while that fetch is in flight — same guard the
+  // bundle fetch above uses, for the same reason: a superseded boot must not
+  // go on to install its chrome over the city the user actually asked for.
+  if (mySeq !== bootSeq) return false;
 
   const manifest = d.manifest;
   const activeEntry = cityEntry(slug);
@@ -755,6 +791,81 @@ async function initApp() {
     session.lifePromise.catch(() => { session.lifePromise = null; });
     return session.lifePromise;
   }
+
+  // The desert BITMAPS. Same shape as loadLifeForSession above and for the
+  // same reasons — memoized on the session (session.desertPromise), dropped by
+  // teardown() (step 4.6), and a rejection clears the memo so a transient
+  // fetch failure does not poison every later attempt.
+  //
+  // Differences from Life, all forced by the data:
+  //
+  //  * The MANIFEST is already loaded. boot() fetched deserts.json eagerly
+  //    because the rail's visibility rule needs it synchronously, so this only
+  //    fetches the .bin half and reads session.deserts for cell counts.
+  //  * Only COVERED subareas are loaded. A subarea with coverage_ok:false has
+  //    no honest desert claim to make (Tokyo: 149 stops for 705k edges), and
+  //    bake_deserts writes no .bin for it — fetching one would 404. This is
+  //    also why an all-uncovered city throws rather than rendering an empty
+  //    layer that would read as "no deserts here".
+  //  * cellCount is not carried in the .bin (the wire format is a bare
+  //    packbits payload with no header), so it comes from deserts.json's
+  //    `cells` and is cross-checked against the geometry it must render 1:1
+  //    onto (street_<Sub>_seg.bin length / 4) — the same "cell i -> seg[4i]"
+  //    identity Life asserts, checked here for the same reason: a re-bake that
+  //    resized either side must fail loudly, not draw a network offset by one.
+  function loadDesertsForSession(citySlug) {
+    if (session.desertPromise) return session.desertPromise;
+    session.desertPromise = (async () => {
+      const json = session.deserts;
+      if (!json || !json.subareas) {
+        throw new Error(`deserts: no baked manifest for '${citySlug}'`);
+      }
+      const names = Object.keys(json.subareas)
+        .filter((n) => json.subareas[n].coverage_ok === true);
+      if (names.length === 0) {
+        throw new Error(
+          `deserts: no subarea of '${citySlug}' passes the coverage floor — ` +
+          "the feed is too sparse to support the desert claim honestly."
+        );
+      }
+
+      const dir = dataDirFor(citySlug);
+      const bits = new Map();
+      await Promise.all(names.map(async (name) => {
+        // Subarea names are non-ASCII in the shipped bake (desert_Zürich.bin),
+        // so the path is percent-encoded exactly as life.js encodes its own.
+        const r = await fetch(`${dir}/${encodeURIComponent(`desert_${name}`)}.bin`);
+        if (!r.ok) {
+          throw new Error(`Failed to fetch desert_${name}.bin: ${r.status} ${r.statusText}`);
+        }
+        const buf = await r.arrayBuffer();
+        const nCells = json.subareas[name].cells;
+        const streetSeg = d.streets[name];
+        const geomCells = streetSeg ? streetSeg.length / 4 : NaN;
+        if (nCells !== geomCells) {
+          throw new Error(
+            `deserts: ${name} manifest cells ${nCells} != street_${name}_seg.bin/4 ${geomCells} ` +
+            "— the 1:1 cell<->edge geometry assumption is broken; refusing to render garbage."
+          );
+        }
+        // packbits rounds up to whole bytes; anything shorter means a
+        // truncated download, which unpackDesertBits would silently zero-fill
+        // into "everything is reached" — the most flattering possible lie.
+        if (buf.byteLength * 8 < nCells) {
+          throw new Error(
+            `deserts: ${name} bitmap holds ${buf.byteLength * 8} bits for ${nCells} cells ` +
+            "— the .bin is truncated; refusing to under-report deserts."
+          );
+        }
+        bits.set(name, unpackDesertBits(buf, nCells));
+      }));
+
+      session.desertBits = bits;
+      return bits;
+    })();
+    session.desertPromise.catch(() => { session.desertPromise = null; });
+    return session.desertPromise;
+  }
   // Debug hooks (?debug=1 only), mirroring the window.__wrCapture pattern so
   // production never exposes mutable internals.
   //
@@ -935,10 +1046,13 @@ async function initApp() {
     // phrasing, never engine terms. delta is SIM seconds, which at 1x IS
     // real seconds.
     // The whisper counts down to the next transit event, which has no meaning
-    // in Life mode — leave it blank there rather than narrating a clock the
-    // user is not looking at.
+    // in Life mode — nor in Deserts, whose whole claim is that no event ever
+    // arrives at these streets. Leave it blank in both rather than narrating a
+    // clock the user is not looking at (in Deserts it would be worse than
+    // noise: a countdown to an arrival, over a plate about the absence of
+    // arrivals).
     let w = "";
-    if (state.mode !== "life" && state.speed === 1 && !state.paused) {
+    if (state.mode === "ripples" && state.speed === 1 && !state.paused) {
       const nxt = nextEventInView(eventTime, eventStop, stops, state.sePtr, viewBbox());
       if (nxt) {
         const dsec = Math.max(0, Math.round(nxt.simSec - state.t));
@@ -1111,6 +1225,13 @@ async function initApp() {
     octx.setTransform(dpr, 0, 0, dpr, 0, 0);
     octx.clearRect(0, 0, cw, ch);
     if (!state.proj) return;
+    // The desert plate rides on THIS canvas, under the rings, and nowhere
+    // else. It is static geometry — it changes only when the camera does,
+    // which is exactly this function's repaint trigger — so drawing it per
+    // rAF frame in the GL path would re-project ~100k–630k segments 60x a
+    // second to produce an identical image. Off-mode this is a no-op, so the
+    // ripple and Life paths are untouched in both directions.
+    drawDesertLayer();
     if (state.district) {
       const a = selectionAlpha(state.district.bbox);
       if (a > 0.01) {
@@ -1126,6 +1247,142 @@ async function initApp() {
       ringPath(state.hoverDistrict.ring);
       octx.stroke();
     }
+  }
+
+  // ---- the desert plate ----------------------------------------------------
+  //
+  // Deserts mode's one visual decision, named here rather than inlined at the
+  // call site so the whole register is reviewable in one place.
+  //
+  // #8a8578 is a warm grey — desaturated, no hue that reads as a warning, and
+  // far from the palette's cyan/amber service colours so it can never be
+  // mistaken for a mode. At alpha 0.55 over the #101420 canvas it settles just
+  // above the ground rather than sitting on top of it. 0.8 px is at or under
+  // the ripple layer's stroke weight, so the inverted plate is never the
+  // busier of the two images.
+  //
+  // Deliberately NOT alarm-coloured. A desert here means "more than a
+  // horizon_sec walk from any stop" (300 s == 5 minutes in the shipped bake) —
+  // a statement about walking distance, not about danger or unreachability.
+  const DESERT_STYLE = { colour: "#8a8578", alpha: 0.55, width: 0.8 };
+
+  // The register is ABSENCE (workspace rule #7 / the spec's §3.4). Deserts are
+  // a muted warm grey at low alpha over the dark canvas — a ground the eye
+  // reads as unlit, not a hazard overlay. Two consequences worth stating
+  // because they look like omissions:
+  //
+  //   * REACHED STREETS ARE NOT DRAWN. The negative space IS the image. A
+  //     "here is the network, and here is the hole in it" two-layer plate
+  //     would make the hole a highlight, which is the reading this mode
+  //     exists to avoid.
+  //   * The stroke is 0.8 px, at or under the ripple layer's weight, so
+  //     inverting the mode does not make the plate busier than the mode it
+  //     inverts.
+  //
+  // Called only from drawDistrictOutline (the overlay's one repaint path), so
+  // it must be a cheap no-op in every other mode and before the bitmaps land.
+  function drawDesertLayer() {
+    if (state.mode !== "deserts") return;
+    const bits = session.desertBits;
+    if (!bits || bits.size === 0) return;
+    const project = state.proj.fn;
+    for (const [name, cellBits] of bits) {
+      const segs = d.streets[name];
+      if (!segs) continue; // a subarea with a bitmap but no geometry: skip, do not throw mid-paint
+      drawDeserts(octx, segs, cellBits, project, DESERT_STYLE);
+    }
+  }
+
+  // ---- the subarea ranking -------------------------------------------------
+  //
+  // Rendered into the EXISTING #district-panel body rather than a parallel
+  // panel, and out of the panel's own classes (.dp-city for the heading,
+  // .dp-empty's muted register for the rows) — a second right-hand panel would
+  // fight the place navigator for the same edge.
+  //
+  // PER SUBAREA, not per district: districts.json exists for Helsinki alone,
+  // so a district ranking would be a Helsinki-only feature wearing a
+  // twelve-city name. Helsinki shows four rows; every other city shows one.
+  // That is a deliberate, narrower substitution, stated in the spec (§3.4).
+  //
+  // Idempotent and self-removing: it drops any previously rendered block
+  // first, so leaving the mode (or re-entering it) can call it unconditionally.
+  //
+  // It also OWNS THE PANEL'S OPEN STATE while Deserts is active, because
+  // rendering the rows is not the same as showing them: #district-panel is
+  // collapsed by default (it is the vertical "PLACES" tab), so the first
+  // version of this shipped a correct #dp-deserts measuring 0x0 that no user
+  // would ever see. Presence is not visibility — the live gate now measures a
+  // rect, not an element.
+  //
+  // The user's own preference is remembered in desertPanelWasOpen and put back
+  // on the way out, so entering and leaving Deserts leaves the panel exactly as
+  // they had it. Auto-open goes through placePanel.setOpen() rather than poking
+  // `hidden`, so the body/.open/aria triple stays consistent (panel.js owns it).
+  let desertPanelWasOpen = null; // null = we have not auto-opened
+  function renderDesertPanel() {
+    const body = panelRoot ? panelRoot.querySelector("#dp-body") : null;
+    if (!body) return;
+    body.querySelector("#dp-deserts")?.remove();
+    if (state.mode !== "deserts") {
+      // Leaving: restore whatever the user had before we auto-opened. Only
+      // ever touches the panel if WE were the one who opened it.
+      if (desertPanelWasOpen !== null) {
+        if (!desertPanelWasOpen) placePanel.setOpen(false);
+        desertPanelWasOpen = null;
+      }
+      return;
+    }
+    const listEl = body.querySelector("#dp-list");
+    const rows = rankSubareas(session.deserts);
+    if (rows.length === 0) return;
+
+    const wrap = document.createElement("div");
+    wrap.id = "dp-deserts";
+    const head = document.createElement("div");
+    head.className = "dp-city";
+    head.textContent = "Desert share";
+    wrap.appendChild(head);
+
+    for (const r of rows) {
+      const row = document.createElement("div");
+      row.className = "dp-desert-row";
+      const name = document.createElement("span");
+      name.className = "dp-desert-name";
+      name.textContent = r.name;
+      const pct = document.createElement("span");
+      pct.className = "dp-desert-pct";
+      pct.textContent = `${(r.fraction * 100).toFixed(1)}%`;
+      const cells = document.createElement("span");
+      cells.className = "dp-desert-cells";
+      // desert / total, both stated: a bare percentage of an unstated
+      // denominator invites comparing Kauniainen's 2,521 cells with
+      // Helsinki's 117,343 as if they were the same kind of number.
+      cells.textContent =
+        `${r.desert.toLocaleString()} / ${r.cells.toLocaleString()}`;
+      row.append(name, pct, cells);
+      wrap.appendChild(row);
+    }
+    // Inserted BEFORE #dp-list, as its sibling. Both halves of that matter:
+    //
+    //   * before — this is the mode's headline number, and Helsinki's place
+    //     list is ~80 rows inside a scrolling panel. Appended to the end it
+    //     rendered correctly and was invisible without a long scroll, which
+    //     is the same as not shipping it. Verified by looking at the open
+    //     panel, not by asserting the rows exist in the DOM.
+    //   * sibling, not child — panel.js's render() does `listEl.textContent =
+    //     ""` on every search keystroke and every row click. Anything placed
+    //     INSIDE #dp-list would be wiped by the next keypress; a sibling of it
+    //     is untouched.
+    body.insertBefore(wrap, listEl ?? null);
+
+    // Now make it visible. Remember the user's state on the FIRST auto-open
+    // only (re-entering the mode without leaving must not overwrite the
+    // remembered value with our own opened state), and never focus the search
+    // box — the user asked for a mode, not a text field, and stealing focus
+    // there would swallow the next Space as a keystroke instead of a pause.
+    if (desertPanelWasOpen === null) desertPanelWasOpen = placePanel.isOpen();
+    placePanel.setOpen(true);
   }
 
   // ---- place tree panel: navigation + highlight only ----------------------
@@ -1246,6 +1503,11 @@ async function initApp() {
   // scrubber -> t (hard jump: clear the field, resync sePtr)
   scrubberEl.addEventListener("input", () => {
     const frac = parseFloat(scrubberEl.value);
+    // No time axis in Deserts (see skipBy) — a drag there must not silently
+    // move the ripple clock under a plate that does not depend on it. The
+    // handle is left wherever the user dragged it; updateScrubberFromT() puts
+    // it back on state.t the moment Ripples is re-entered.
+    if (state.mode === "deserts") return;
     if (state.mode === "life") {
       // Life scrub: reposition the generation clock. No field clear is needed
       // (Life re-stamps from scratch every frame from the frame data alone,
@@ -1304,24 +1566,37 @@ async function initApp() {
     return label;
   }
 
+  // Three modes now, so "active" can no longer be derived from one boolean:
+  // `!isLife` used to mean Ripples, and with Deserts on the rail that would
+  // light Ripples up while Deserts is showing. Each button compares against
+  // state.mode directly.
   function syncModeButtons() {
-    const isLife = state.mode === "life";
-    if (modeRipplesEl) {
-      modeRipplesEl.classList.toggle("active", !isLife);
-      modeRipplesEl.setAttribute("aria-pressed", String(!isLife));
-    }
-    if (modeLifeEl) {
-      modeLifeEl.classList.toggle("active", isLife);
-      modeLifeEl.setAttribute("aria-pressed", String(isLife));
+    const pairs = [
+      [modeRipplesEl, "ripples"],
+      [modeLifeEl, "life"],
+      [modeDesertsEl, "deserts"],
+    ];
+    for (const [el, mode] of pairs) {
+      if (!el) continue;
+      const on = state.mode === mode;
+      el.classList.toggle("active", on);
+      el.setAttribute("aria-pressed", String(on));
     }
   }
 
-  // Enter/leave Life. Leaving is the important half: it must put ripple mode
-  // back exactly as it was, which means resyncing the sim cursor to state.t
-  // (it stopped advancing while Life owned the clock, so every event between
-  // sePtr and now is stale) and dropping any in-flight wavefronts, the same
-  // hard-jump idiom the scrubber and ±15m handlers use. Nothing about the
-  // ripple render path itself is touched, in either direction.
+  // Enter/leave a non-Ripples mode. Leaving is the important half: it must put
+  // ripple mode back exactly as it was, which means resyncing the sim cursor to
+  // state.t (it stopped advancing while the other mode owned the clock, so
+  // every event between sePtr and now is stale) and dropping any in-flight
+  // wavefronts, the same hard-jump idiom the scrubber and ±15m handlers use.
+  // Nothing about the ripple render path itself is touched, in any direction.
+  //
+  // THREE branches now, and the shape matters: "life" and "deserts" each own
+  // their enter path, and the `else` REMAINS the single ripples-restore path.
+  // Deserts stops the ripple clock exactly as Life does — it is a static plate
+  // with no time axis at all — so it needs the same restore on the way out,
+  // and gets it by falling into the same else. Any future mode must be added
+  // as another named branch above, never by widening the else.
   async function setMode(next) {
     if (next === state.mode) return;
     if (next === "life") {
@@ -1381,12 +1656,51 @@ async function initApp() {
       field.resize(canvas.width, canvas.height);
       updateScrubberFromT();
       clockEl.textContent = lifeClockText();
+      // Life can be entered FROM Deserts, so the desert plate and its ranking
+      // rows have to be taken down here too, not only on the way to Ripples.
+      renderDesertPanel();
+      drawDistrictOutline();
+    } else if (next === "deserts") {
+      state.mode = "deserts";
+      syncModeButtons();
+      // Same refcounted-spinner contract as the Life branch above: take the
+      // spinner only when this call will actually fetch, and hand it back
+      // exactly once on EVERY exit path via `finally`.
+      const spinning = session.desertBits === null;
+      if (spinning) showLoading(true);
+      try {
+        await loadDesertsForSession(slug);
+      } catch (err) {
+        console.error("deserts: load failed", err);
+        if (statusEl) statusEl.textContent = `Deserts unavailable: ${err.message}`;
+        setMode("ripples"); // fall back to what definitely works
+        return;
+      } finally {
+        if (spinning) showLoading(false);
+      }
+      // A mode flip or city switch landed while the fetch was in flight.
+      if (currentSession !== session || state.mode !== "deserts") return;
+      // Deserts is a STATIC plate: it has no clock, so the ripple field must
+      // go dark rather than sit frozen on the last lit frame. state.t is left
+      // untouched — the else-branch below is what resyncs sePtr on the way
+      // back, exactly as it does for Life.
+      field.resize(canvas.width, canvas.height);
+      field.present();
+      clockEl.textContent = desertLabel(session.deserts?.horizon_sec ?? 300);
+      renderDesertPanel();
+      // The desert layer lives on the #overlay canvas, which is only repainted
+      // on camera change / selection / hover — nothing about entering a mode
+      // moves the camera, so the first paint has to be asked for explicitly.
+      drawDistrictOutline();
     } else {
       state.mode = "ripples";
       syncModeButtons();
-      // Hand the ripple clock back cleanly: state.t never moved while Life was
-      // showing, but sePtr is where it was left, and any activeEvents are from
-      // before the detour. Same three lines skipBy()/the scrubber use.
+      renderDesertPanel();   // tears the ranking rows back out of the panel
+      drawDistrictOutline(); // and the desert layer off the overlay
+      // Hand the ripple clock back cleanly: state.t never moved while Life or
+      // Deserts was showing, but sePtr is where it was left, and any
+      // activeEvents are from before the detour. Same three lines
+      // skipBy()/the scrubber use.
       state.sePtr = lowerBound(eventTime, state.t);
       field.resize(canvas.width, canvas.height);
       clearActiveEvents();
@@ -1395,11 +1709,47 @@ async function initApp() {
     }
   }
 
-  // Life is baked for Helsinki only (plan scope), so the rail is HIDDEN
-  // rather than shown-and-broken for any other city. boot() runs per city, so
-  // this is re-evaluated on every switch.
+  // The rail is shown when ANY mode beyond Ripples is available for this city.
+  // It used to be `slug !== "helsinki"` because Life is Helsinki-only; Deserts
+  // is baked for 11 of 12 cities, so a Helsinki-only rule would hide a mode
+  // that works. Each button is enabled independently below.
+  //
+  // NOTE: #mode-rail is in CHROME_OVERLAY_IDS and now shows for nearly every
+  // city, so tests/test_capture_chrome_hidden.py is what keeps it out of
+  // captures. It leaked into nine committed loops the last time this was
+  // maintained by eye.
+  const lifeOk = slug === "helsinki";
+  // The subarea names come from the MANIFEST, not from `placeNames`.
+  //
+  // This block was written (Task 5) against `placeNames`, and that source is
+  // wrong in a way no unit test could catch, because the JS test mirrors this
+  // rule rather than importing it: `placeNames` is flattenTree(placeTree), and
+  // flattenTree deliberately SKIPS the root — it walks `node.children` only
+  // (places.js:9). Every deserts subarea name IS a root name ("Helsinki",
+  // "Zürich", "Berlin"), so the intersection was empty for all 12 cities and
+  // desertAvailable() returned false everywhere. The button was disabled in
+  // every city, including the 11 with a good bake; found by driving the live
+  // page, not by the suite.
+  //
+  // manifest.cities is the right source and is exactly the axis the bake
+  // partitions on: bake_deserts enumerates subareas from manifest.json's
+  // `cities` keys, so these names match deserts.json's `subareas` keys
+  // one-for-one by construction, for every city (verified across all 12).
+  const subareaNames = Object.keys(manifest.cities || {});
+  const desertsOk = desertAvailable(session.deserts, subareaNames);
   if (modeRailEl) {
-    modeRailEl.hidden = slug !== "helsinki";
+    modeRailEl.hidden = !(lifeOk || desertsOk);
+  }
+  if (modeLifeEl) {
+    modeLifeEl.disabled = !lifeOk;
+    modeLifeEl.setAttribute("aria-disabled", String(!lifeOk));
+  }
+  if (modeDesertsEl) {
+    modeDesertsEl.disabled = !desertsOk;
+    modeDesertsEl.setAttribute("aria-disabled", String(!desertsOk));
+    modeDesertsEl.title = desertsOk
+      ? desertLabel(session.deserts?.horizon_sec ?? 300)
+      : "Not available — this city's feed is too sparse to map deserts honestly";
   }
   // Sunlight, unlike Life, applies to EVERY city (per-city latitude is the
   // whole point) — unhide unconditionally rather than mirroring the
@@ -1413,6 +1763,7 @@ async function initApp() {
   // would just be dead code to trip over when the APC mode lands.
   modeRipplesEl?.addEventListener("click", () => { setMode("ripples"); }, { signal: abort.signal });
   modeLifeEl?.addEventListener("click", () => { setMode("life"); }, { signal: abort.signal });
+  modeDesertsEl?.addEventListener("click", () => { setMode("deserts"); }, { signal: abort.signal });
 
   // Sun rail: reflects state.sunEnabled/state.sunSeason, which may already be
   // non-default here — either from ?sun=off / ?season=<key> on the FIRST
@@ -1485,6 +1836,11 @@ async function initApp() {
   const LIFE_SKIP_GENS = 12;
 
   function skipBy(deltaSec) {
+    // Deserts has NO time axis — the plate is a structural statement about the
+    // whole baked window, not a moment in it. Skipping there would silently
+    // move state.t under a mode that never shows it AND overwrite the desert
+    // label on the clock with an HH:MM the image does not correspond to.
+    if (state.mode === "deserts") return;
     if (state.mode === "life") {
       const last = Math.max(0, lifeNFrames() - 1);
       const step = Math.sign(deltaSec) * LIFE_SKIP_GENS;
@@ -2432,6 +2788,22 @@ async function initApp() {
     const dtRealMs = state.paused ? 0 : ts - state.lastFrameTs;
     state.lastFrameTs = ts;
     recordFrameDt(dtRealMs);
+
+    // ---- Deserts mode: a static plate, so this loop does almost nothing ------
+    // The image is already on the #overlay canvas, drawn by drawDistrictOutline
+    // on camera change — there is nothing per-frame to redraw. This branch
+    // exists only to keep the rAF loop and the fly-to stepping above alive
+    // while contributing NO sim advance, NO event sweep, NO field stamp and no
+    // write to state.t / state.sePtr. That containment is precisely what makes
+    // returning to Ripples a resync rather than an unwind.
+    //
+    // The GL field is left as setMode cleared it. Re-presenting an empty field
+    // every frame would only burn a draw call to produce the same black.
+    if (state.mode === "deserts") {
+      maybeUpdateStatus(ts);
+      session.rafHandle = requestAnimationFrame(frame);
+      return;
+    }
 
     // ---- Life mode: replay baked generations ---------------------------------
     // A COMPLETE, EARLY-RETURNING branch. It shares the loop's frame pacing,

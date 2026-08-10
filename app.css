@@ -316,6 +316,34 @@ body.chrome-hidden #sun-rail { opacity: 0; pointer-events: none;
 #dp-search:focus-visible { outline: 2px solid #6fd3e6; outline-offset: -1px; }
 .dp-empty { padding: 8px 10px; color: #7d8494; font-size: 12px; }
 
+/* ---------- Deserts: the per-subarea ranking ----------
+   Shown inside #dp-body only while Deserts mode is active (app.js's
+   renderDesertPanel adds and removes the whole #dp-deserts block), so it needs
+   no hidden state of its own.
+
+   It reports rather than navigates, so it is deliberately quieter than the
+   place rows above it: no hover, no cursor, no focus ring, nothing that
+   suggests it is clickable. Same rationale as .dp-country being quieter than
+   .dp-cityswitch — the eye should land on what it can act on first.
+
+   The numbers are tabular-figure monospace so the percent column stays aligned
+   down four rows (Helsinki's case); a proportional font would let 32.0% and
+   3.8% wander and turn a ranking into a list. */
+#dp-deserts { margin-top: 10px; padding-top: 8px; border-top: 1px solid #222833; }
+.dp-desert-row { display: grid; grid-template-columns: 1fr auto; column-gap: 8px;
+  align-items: baseline; padding: 4px 10px; font-size: 12px; color: #9aa1ad; }
+.dp-desert-name { color: #c7ccd6; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+/* The percentage is the ranked quantity, so it is the one bright thing here --
+   warm grey, matching the plate's own #8a8578 rather than the cyan the
+   navigation uses, so panel and map read as one statement. */
+.dp-desert-pct { color: #b3ac9c; font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, monospace; }
+/* desert / total cells: the denominator, quietest of the three, spanning both
+   columns on its own line so it never competes with the percentage. */
+.dp-desert-cells { grid-column: 1 / -1; color: #6d7480; font-size: 11px;
+  font-variant-numeric: tabular-nums; font-family: ui-monospace, monospace; }
+
 @media (max-width: 640px) {
   /* bottom sheet: tab sits above the chrome bar; body slides up full-width */
   #district-panel { top: auto; right: 0; left: 0; bottom: 0; align-items: flex-end;

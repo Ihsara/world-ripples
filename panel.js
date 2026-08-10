@@ -7,8 +7,8 @@
 // CITY_ORDER = ["Helsinki","Espoo","Vantaa","Kauniainen"] made this panel
 // render nothing for Berlin even when Berlin had data.
 
-import { filterRows, flattenTree, rankRows } from "./places.js?v=f32de640d8";
-import { countriesOf, countryOfSlug, filterCities } from "./cities.js?v=f32de640d8";
+import { filterRows, flattenTree, rankRows } from "./places.js?v=f288c2c188";
+import { countriesOf, countryOfSlug, filterCities } from "./cities.js?v=f288c2c188";
 
 // Below this many rows a search box is noise rather than help.
 const SEARCH_MIN_ROWS = 15;
@@ -17,6 +17,30 @@ const SEARCH_MIN_ROWS = 15;
 // chips are just a second, worse copy of the city row. Same judgement as
 // SEARCH_MIN_ROWS, applied to the axis above it.
 const COUNTRY_MIN = 4;
+
+// The ONE writer of the panel's open/closed state. Three things have to move
+// together — the body's `hidden`, the root's `.open` class (the CSS that widens
+// the rail) and the tab's `aria-expanded` — and they were previously moved only
+// inside the tab's click handler, which made "open the panel" unreachable from
+// anywhere else without duplicating the state machine and letting it drift.
+//
+// Deserts mode needs exactly that: its ranking renders into #dp-body, and the
+// panel is COLLAPSED BY DEFAULT, so the rows were present at 0x0 and no user
+// ever saw them. app.js now calls setOpen() below rather than poking `hidden`.
+//
+// `focus` is opt-in because the two callers differ: a human clicking the tab
+// asked for the search box, but an auto-open on entering a mode did not — and
+// stealing focus into a text input would swallow the next keystroke (Space
+// toggles pause).
+//
+// Takes the elements as an object so it is testable without a DOM, the same
+// injected-seam idiom chrome.js uses.
+export function applyPanelOpen({ rootEl, bodyEl, tabEl, searchEl }, open, { focus = false } = {}) {
+  bodyEl.hidden = !open;
+  tabEl.setAttribute("aria-expanded", String(open));
+  rootEl.classList.toggle("open", open);
+  if (open && focus && searchEl) searchEl.focus();
+}
 
 export function createPlacePanel(rootEl, { tree, cities, activeSlug, onSelect,
                                            onCity, onHover, signal }) {
@@ -45,12 +69,11 @@ export function createPlacePanel(rootEl, { tree, cities, activeSlug, onSelect,
   const searchEl = rootEl.querySelector("#dp-search");
   const listEl = rootEl.querySelector("#dp-list");
 
+  const els = { rootEl, bodyEl, tabEl, searchEl };
+
   tabEl.addEventListener("click", () => {
-    const open = bodyEl.hidden;
-    bodyEl.hidden = !open;
-    tabEl.setAttribute("aria-expanded", String(open));
-    rootEl.classList.toggle("open", open);
-    if (open) searchEl.focus();
+    // A human asked for this one, so it keeps the focus-the-search behaviour.
+    applyPanelOpen(els, bodyEl.hidden, { focus: true });
   }, { signal });
 
   // `cities` arrives as a bare array from app.js; the country helpers take the
@@ -172,6 +195,12 @@ export function createPlacePanel(rootEl, { tree, cities, activeSlug, onSelect,
     rowEls.get(id)?.classList.add("active");
   }
 
+  // setOpen/isOpen let app.js auto-open the panel for Deserts mode (whose
+  // ranking lives inside #dp-body) and put it back exactly as the user left it
+  // on the way out, without any caller reaching past this module into `hidden`.
+  function setOpen(open) { applyPanelOpen(els, open); }
+  function isOpen() { return !bodyEl.hidden; }
+
   render();
-  return { setActive, render };
+  return { setActive, render, setOpen, isOpen };
 }
