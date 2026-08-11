@@ -180,6 +180,26 @@ body { font: 15px/1.45 system-ui, sans-serif; color: #e8e8ec; background: #10142
    otherwise beat the UA stylesheet's display:none. */
 #sun-rail[hidden] { display: none !important; }
 
+/* ---------- view rail: spatial zoom presets (core / petite / grande, ...) ----------
+   Same left-edge treatment, stacked below #sun-rail. Button/active language is
+   copied verbatim from #sun-rail buttons -- a view is a camera choice, same
+   register as a season choice, not a new control language. */
+#view-rail {
+  position: fixed; left: 0; top: 50%; margin-top: 124px; z-index: 6;
+  display: flex; flex-direction: row; gap: 3px; padding: 6px;
+  background: rgba(14,18,30,.9); border: 1px solid #2a313d; border-left: none;
+  border-radius: 0 10px 10px 0;
+}
+#view-rail button {
+  border: 1px solid #2a313d; background: rgba(16,20,32,.82); color: #c7ccd6;
+  border-radius: 7px; padding: 4px 10px; font: inherit; font-size: 12px; cursor: pointer;
+}
+#view-rail button:hover:not(.active) { border-color: #46505f; color: #e8e8ec; }
+#view-rail button.active { background: #6fd3e6; color: #061014; border-color: #6fd3e6; font-weight: 600; }
+#view-rail button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+/* Same [hidden] specificity trap #mode-rail/#sun-rail hit. */
+#view-rail[hidden] { display: none !important; }
+
 /* Idle-hide: in fullscreen the chrome gets out of the way and returns on move. */
 body.chrome-hidden #chrome,
 body.chrome-hidden #fullscreen-btn,
@@ -187,7 +207,8 @@ body.chrome-hidden #help-btn,
 body.chrome-hidden #credits-btn,
 body.chrome-hidden #district-panel,
 body.chrome-hidden #mode-rail,
-body.chrome-hidden #sun-rail { opacity: 0; pointer-events: none;
+body.chrome-hidden #sun-rail,
+body.chrome-hidden #view-rail { opacity: 0; pointer-events: none;
   transition: opacity .4s; }
 
 /* ---------- intro overlay + click-stepper ----------

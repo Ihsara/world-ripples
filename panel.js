@@ -7,8 +7,8 @@
 // CITY_ORDER = ["Helsinki","Espoo","Vantaa","Kauniainen"] made this panel
 // render nothing for Berlin even when Berlin had data.
 
-import { filterRows, flattenTree, rankRows } from "./places.js?v=4564b7c5c6";
-import { countriesOf, countryOfSlug, filterCities } from "./cities.js?v=4564b7c5c6";
+import { filterRows, flattenTree, rankRows } from "./places.js?v=0dad9d5858";
+import { countriesOf, countryOfSlug, filterCities } from "./cities.js?v=0dad9d5858";
 
 // Below this many rows a search box is noise rather than help.
 const SEARCH_MIN_ROWS = 15;

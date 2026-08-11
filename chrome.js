@@ -18,7 +18,7 @@
 // asserts it covers every visible top-level overlay in the real HTML.
 export const CHROME_OVERLAY_IDS = [
   "chrome", "district-panel", "status", "stepper", "intro", "tierbar",
-  "mode-rail", "sun-rail", "credits",
+  "mode-rail", "sun-rail", "view-rail", "credits",
 ];
 
 // Takes `doc` rather than reaching for a global `document` so this runs

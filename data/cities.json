@@ -276,6 +276,70 @@
       ]
     },
     {
+      "slug": "paris",
+      "display_name": "Paris",
+      "coverage_note": "Le réseau francilien : les 16 lignes de métro, le RER et le Transilien, les tramways et le réseau de bus d'Île-de-France. Le funiculaire de Montmartre et le téléphérique sont affichés comme trains (le moteur ne connaît que cinq modes). Données Île-de-France Mobilités (https://data.iledefrance-mobilites.fr), mises à disposition sous « Licence Mobilités » (https://cloud.fabmob.io/s/eYWWJBdM3fQiFNm). Instantané du 2026-08-11 ; les données sont transformées (filtrage géographique, ré-échantillonnage temporel) pour cette carte.",
+      "country": "France",
+      "region_bbox": [
+        2.1,
+        48.7,
+        2.6,
+        49.02
+      ],
+      "subareas": {
+        "Paris": [
+          1.9,
+          48.55,
+          2.85,
+          49.1
+        ]
+      },
+      "intro_bbox": [
+        2.1,
+        48.7,
+        2.6,
+        49.02
+      ],
+      "views": [
+        {
+          "slug": "core",
+          "label": "Paris et sa couronne",
+          "bbox": [
+            2.12,
+            48.72,
+            2.58,
+            49.0
+          ]
+        },
+        {
+          "slug": "petite",
+          "label": "Petite couronne",
+          "bbox": [
+            2.1,
+            48.7,
+            2.6,
+            49.02
+          ]
+        },
+        {
+          "slug": "grande",
+          "label": "Grande couronne",
+          "bbox": [
+            1.9,
+            48.55,
+            2.85,
+            49.1
+          ]
+        }
+      ],
+      "utc_offset_hours": [
+        1,
+        2,
+        2,
+        1
+      ]
+    },
+    {
       "slug": "porto",
       "display_name": "Porto",
       "coverage_note": "Porto's public transport: the STCP city bus network and all seven Metro do Porto light-rail lines (A-F and Bx), including the B line's coastal run north to Póvoa de Varzim. Suburban and regional trains are NOT included: CP's feed carries no licence permitting redistribution, so Porto's Campanhã and São Bento rail services are absent from this map. Data from Porto Open Data (opendata.porto.digital), published by STCP and Metro do Porto under CC0 / Domínio Público.",

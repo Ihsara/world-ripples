@@ -13,29 +13,30 @@
 // vehicle dots are interpolated in JS at playback (Option A) and impact dots
 // flash at a stop the instant its event fires.
 
-import { loadAll, makeCityCache } from "./data.js?v=4564b7c5c6";
-import { loadLife } from "./life.js?v=4564b7c5c6";
-import { cellAlpha, precomputeDeaths, precomputeLastMode } from "./lifeview.js?v=4564b7c5c6";
+import { loadAll, makeCityCache } from "./data.js?v=0dad9d5858";
+import { loadLife } from "./life.js?v=0dad9d5858";
+import { cellAlpha, precomputeDeaths, precomputeLastMode } from "./lifeview.js?v=0dad9d5858";
 import { makeProjection, eventsInWindow, RippleField, realAge, clampSkip,
          rippleLifeHorizon, nextEventInView, whisperText,
-         normalizeStampIntensity } from "./field.js?v=4564b7c5c6";
-import { vehiclePosition } from "./vehicles.js?v=4564b7c5c6";
+         normalizeStampIntensity } from "./field.js?v=0dad9d5858";
+import { vehiclePosition } from "./vehicles.js?v=0dad9d5858";
 import { deriveCorridorWeights, buildCorridorGeometry, corridorWidth,
          corridorBrightness, edgeModeCounts, overlapColour, MODE_RANK,
-         COLOUR_MODES } from "./corridors.js?v=4564b7c5c6";
-import { lifeSimSec, vehicleStyleFor } from "./lifevehicles.js?v=4564b7c5c6";
+         COLOUR_MODES } from "./corridors.js?v=0dad9d5858";
+import { lifeSimSec, vehicleStyleFor } from "./lifevehicles.js?v=0dad9d5858";
 import { createCamera, cameraProjection, panBy, zoomAboutPoint, resizeCamera,
          startFlyTo, stepFlyTo, visibleBbox, viewWidthKm, projectInto,
-         inflateBbox, fitBboxScale } from "./camera.js?v=4564b7c5c6";
-import { createPlacePanel } from "./panel.js?v=4564b7c5c6";
-import { SEASONS } from "./solar.js?v=4564b7c5c6";
-import { makeSunState, parseSunLink } from "./sunstate.js?v=4564b7c5c6";
+         inflateBbox, fitBboxScale } from "./camera.js?v=0dad9d5858";
+import { createPlacePanel } from "./panel.js?v=0dad9d5858";
+import { SEASONS } from "./solar.js?v=0dad9d5858";
+import { makeSunState, parseSunLink } from "./sunstate.js?v=0dad9d5858";
 import { desertAvailable, desertLabel, drawDeserts, rankSubareas,
-         unpackDesertBits } from "./deserts.js?v=4564b7c5c6";
-import { findById, flattenTree } from "./places.js?v=4564b7c5c6";
-import { loadCities, resolveSlug } from "./cities.js?v=4564b7c5c6";
-import { exportFilename, capturePng, captureCommand, normalizeClock } from "./export.js?v=4564b7c5c6";
-import { CHROME_OVERLAY_IDS } from "./chrome.js?v=4564b7c5c6";
+         unpackDesertBits } from "./deserts.js?v=0dad9d5858";
+import { findById, flattenTree } from "./places.js?v=0dad9d5858";
+import { loadCities, resolveSlug } from "./cities.js?v=0dad9d5858";
+import { exportFilename, capturePng, captureCommand, normalizeClock } from "./export.js?v=0dad9d5858";
+import { CHROME_OVERLAY_IDS } from "./chrome.js?v=0dad9d5858";
+import { pickView } from "./viewswitch.js?v=0dad9d5858";
 
 // ---- AOI bboxes (lon/lat), mirrored from src/region.py EXACTLY -----------
 // Helsinki-specific subareas (fly-to chips + the guided intro's zoomed-in
@@ -413,6 +414,7 @@ async function initApp() {
   const sunRailEl = document.getElementById("sun-rail");
   const sunToggleEl = document.getElementById("sun-toggle");
   const sunSeasonEls = document.querySelectorAll("#sun-seasons button[data-season]");
+  const viewRailEl = document.getElementById("view-rail");
   const modeDesertsEl = document.getElementById("mode-deserts");
   const helpBtnEl = document.getElementById("help-btn");
   const creditsBtnEl = document.getElementById("credits-btn");
@@ -1127,8 +1129,14 @@ async function initApp() {
   // canvas (the camera used to always sit over Helsinki's bbox regardless
   // of which city's data was loaded).
   const regionBbox = cameraBboxFor(slug);
+  // Task 7 (Paris, v2.5): a city can declare `views` in cities.json (spatial
+  // zoom presets over the SAME baked bundle -- Paris core/petite/grande). The
+  // ?view= URL param picks one; pickView() falls back to regionBbox with no
+  // slug or an unknown one, so a mis-typed URL still shows the city.
+  const viewSlug = new URLSearchParams(location.search).get("view");
+  const framedBbox = pickView(activeEntry, viewSlug) || regionBbox;
   // CSS px: the camera shares a basis with the pointer events that drive it.
-  const camera = createCamera(regionBbox, cssWidth(), cssHeight(), 24);
+  const camera = createCamera(framedBbox, cssWidth(), cssHeight(), 24);
   // Guided-intro framing is generated from CityConfig. Helsinki's generated
   // value remains its Helsinki subarea byte-for-byte; a region-only city uses
   // its sole named subarea (which is the region bbox).
@@ -1812,6 +1820,39 @@ async function initApp() {
         b.setAttribute("aria-pressed", String(on));
       }
     }, { signal: abort.signal });
+  }
+
+  // View rail: camera-only presets (Task 7, Paris v2.5). Rendered fresh each
+  // boot() -- rebuilding rather than diffing is fine, this is at most a
+  // handful of buttons and boot() already tears down and rebuilds every other
+  // per-city control. Hidden unconditionally (not just left empty) when the
+  // active city declares no views, so the twelve cities without one show no
+  // new UI at all -- this is the blast-radius requirement for the task.
+  const cityViews = (activeEntry && activeEntry.views) || [];
+  if (viewRailEl) {
+    viewRailEl.textContent = "";
+    viewRailEl.hidden = cityViews.length === 0;
+    for (const v of cityViews) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = v.label;
+      btn.dataset.viewSlug = v.slug;
+      const on = v.slug === viewSlug;
+      btn.classList.toggle("active", on);
+      btn.setAttribute("aria-pressed", String(on));
+      btn.addEventListener("click", () => {
+        const url = new URL(location.href);
+        url.searchParams.set("view", v.slug);
+        history.replaceState(null, "", url);
+        flyToBbox(v.bbox);
+        for (const b of viewRailEl.querySelectorAll("button")) {
+          const active = b === btn;
+          b.classList.toggle("active", active);
+          b.setAttribute("aria-pressed", String(active));
+        }
+      }, { signal: abort.signal });
+      viewRailEl.appendChild(btn);
+    }
   }
 
   function setPaused(p) {

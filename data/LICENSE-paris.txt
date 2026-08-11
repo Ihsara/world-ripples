@@ -1,0 +1,52 @@
+Paris — licence et attribution des données de transport
+=========================================================
+
+Source database / base de données source
+-----------------------------------------
+Données Île-de-France Mobilités
+https://data.iledefrance-mobilites.fr
+
+Licence / License
+------------------
+« Licence Mobilités »
+https://cloud.fabmob.io/s/eYWWJBdM3fQiFNm
+
+Instantané / Snapshot date
+---------------------------
+2026-08-11
+
+Modifications apportées (Art. 5.8) / Modifications made (Art. 5.8)
+--------------------------------------------------------------------
+Conformément à l'article 5.8 de la Licence Mobilités, les modifications
+suivantes ont été apportées aux données sources avant intégration dans ce
+jeu de données dérivé :
+
+1. Découpage géographique (geographic clipping) : les données ont été
+   filtrées à l'emprise de la grande couronne francilienne, boîte
+   englobante (bbox) (1.90, 48.55, 2.85, 49.10) en WGS84.
+2. Ré-échantillonnage temporel (temporal resampling) : les horaires ont
+   été ré-échantillonnés sur la fenêtre de simulation utilisée par cette
+   carte, distincte des horaires bruts du jeu de données source.
+3. Dérivation d'isochrones de marche (derivation of walking isochrones) :
+   des isochrones piétonnes ont été calculées à partir du réseau piéton
+   OpenStreetMap (OSM), qui n'est pas une donnée d'Île-de-France Mobilités
+   et n'est pas couvert par la présente licence.
+
+English summary: this bundle is a derived, modified dataset. Modifications
+applied to the source before shipping include (1) geographic clipping to
+the grande-couronne bounding box (1.90, 48.55, 2.85, 49.10), (2) temporal
+resampling of schedules to this map's simulation window, and (3) derivation
+of walking isochrones from the OpenStreetMap walk network (not an Île-de-
+France Mobilités dataset and not covered by this licence).
+
+Attribution complète / Full attribution string
+-------------------------------------------------
+Données Île-de-France Mobilités (https://data.iledefrance-mobilites.fr),
+mises à disposition sous « Licence Mobilités »
+(https://cloud.fabmob.io/s/eYWWJBdM3fQiFNm).
+
+Note sur les droits (Art. 5.9)
+--------------------------------
+Aucune mesure technique ne restreint ici les droits accordés par la
+Licence Mobilités : ce jeu de données est diffusé publiquement, sans
+paywall ni tunnel privé.

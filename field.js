@@ -1,5 +1,5 @@
 // field.js — pure playback helpers (Task 6) + WebGL field (Task 7).
-import { DEFAULT_RGB } from "./sunlight.js?v=4564b7c5c6";
+import { DEFAULT_RGB } from "./sunlight.js?v=0dad9d5858";
 export function makeProjection(bbox, w, h, margin) {
   const m = margin || 10;
   const latMid = (bbox.minY + bbox.maxY) / 2;
