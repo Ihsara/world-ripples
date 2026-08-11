@@ -8,11 +8,17 @@
 // data, so helsinki was the ONLY city that showed it and nine clean loops
 // made the tenth look fine).
 //
+// #sun-rail is the THIRD (caught 2026-08-11, visible as a cyan sun pill in
+// every frame of the 4-city cinematic grid). All three leaked the same way:
+// they ship `hidden` in the markup, so the test's static scan skipped them,
+// and app.js clears that attribute at runtime. tests/ now checks that class
+// generically instead of one id at a time.
+//
 // tests/test_capture_chrome_hidden.py reads this array out of THIS file and
 // asserts it covers every visible top-level overlay in the real HTML.
 export const CHROME_OVERLAY_IDS = [
   "chrome", "district-panel", "status", "stepper", "intro", "tierbar",
-  "mode-rail",
+  "mode-rail", "sun-rail", "credits",
 ];
 
 // Takes `doc` rather than reaching for a global `document` so this runs

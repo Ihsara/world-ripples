@@ -13,29 +13,29 @@
 // vehicle dots are interpolated in JS at playback (Option A) and impact dots
 // flash at a stop the instant its event fires.
 
-import { loadAll, makeCityCache } from "./data.js?v=9849877899";
-import { loadLife } from "./life.js?v=9849877899";
-import { cellAlpha, precomputeDeaths, precomputeLastMode } from "./lifeview.js?v=9849877899";
+import { loadAll, makeCityCache } from "./data.js?v=4564b7c5c6";
+import { loadLife } from "./life.js?v=4564b7c5c6";
+import { cellAlpha, precomputeDeaths, precomputeLastMode } from "./lifeview.js?v=4564b7c5c6";
 import { makeProjection, eventsInWindow, RippleField, realAge, clampSkip,
          rippleLifeHorizon, nextEventInView, whisperText,
-         normalizeStampIntensity } from "./field.js?v=9849877899";
-import { vehiclePosition } from "./vehicles.js?v=9849877899";
+         normalizeStampIntensity } from "./field.js?v=4564b7c5c6";
+import { vehiclePosition } from "./vehicles.js?v=4564b7c5c6";
 import { deriveCorridorWeights, buildCorridorGeometry, corridorWidth,
          corridorBrightness, edgeModeCounts, overlapColour, MODE_RANK,
-         COLOUR_MODES } from "./corridors.js?v=9849877899";
-import { lifeSimSec, vehicleStyleFor } from "./lifevehicles.js?v=9849877899";
+         COLOUR_MODES } from "./corridors.js?v=4564b7c5c6";
+import { lifeSimSec, vehicleStyleFor } from "./lifevehicles.js?v=4564b7c5c6";
 import { createCamera, cameraProjection, panBy, zoomAboutPoint, resizeCamera,
          startFlyTo, stepFlyTo, visibleBbox, viewWidthKm, projectInto,
-         inflateBbox, fitBboxScale } from "./camera.js?v=9849877899";
-import { createPlacePanel } from "./panel.js?v=9849877899";
-import { SEASONS } from "./solar.js?v=9849877899";
-import { makeSunState, parseSunLink } from "./sunstate.js?v=9849877899";
+         inflateBbox, fitBboxScale } from "./camera.js?v=4564b7c5c6";
+import { createPlacePanel } from "./panel.js?v=4564b7c5c6";
+import { SEASONS } from "./solar.js?v=4564b7c5c6";
+import { makeSunState, parseSunLink } from "./sunstate.js?v=4564b7c5c6";
 import { desertAvailable, desertLabel, drawDeserts, rankSubareas,
-         unpackDesertBits } from "./deserts.js?v=9849877899";
-import { findById, flattenTree } from "./places.js?v=9849877899";
-import { loadCities, resolveSlug } from "./cities.js?v=9849877899";
-import { exportFilename, capturePng, captureCommand, normalizeClock } from "./export.js?v=9849877899";
-import { CHROME_OVERLAY_IDS } from "./chrome.js?v=9849877899";
+         unpackDesertBits } from "./deserts.js?v=4564b7c5c6";
+import { findById, flattenTree } from "./places.js?v=4564b7c5c6";
+import { loadCities, resolveSlug } from "./cities.js?v=4564b7c5c6";
+import { exportFilename, capturePng, captureCommand, normalizeClock } from "./export.js?v=4564b7c5c6";
+import { CHROME_OVERLAY_IDS } from "./chrome.js?v=4564b7c5c6";
 
 // ---- AOI bboxes (lon/lat), mirrored from src/region.py EXACTLY -----------
 // Helsinki-specific subareas (fly-to chips + the guided intro's zoomed-in
