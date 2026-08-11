@@ -308,6 +308,38 @@
       ]
     },
     {
+      "slug": "stockholm",
+      "display_name": "Stockholm",
+      "coverage_note": "Stockholm's public transport as operated by SL (Storstockholms Lokaltrafik): all seven Tunnelbana metro lines, the Pendeltåg commuter rail, the Tvärbanan, Nockebybanan, Lidingöbanan, Saltsjöbanan, Roslagsbanan and Spårväg City light-rail lines, the city and regional bus network, and the Djurgården and archipelago ferries. SL is a COUNTY operator, so the feed reaches far beyond the city: the map frames the rail core, and the outer Uppland, Sörmland and archipelago services extend past the opening view. Long-distance operators that are not SL services (SJ intercity, and the Arlanda Express airport link) are not included. Data from Trafiklab's GTFS Regional dataset, published by Samtrafiken i Sverige AB under the CC0 1.0 Universal Public Domain Dedication.",
+      "country": "Sweden",
+      "region_bbox": [
+        17.6,
+        59.15,
+        18.4,
+        59.5
+      ],
+      "subareas": {
+        "Stockholm": [
+          17.45,
+          59.05,
+          18.6,
+          59.62
+        ]
+      },
+      "intro_bbox": [
+        17.6,
+        59.15,
+        18.4,
+        59.5
+      ],
+      "utc_offset_hours": [
+        1,
+        2,
+        2,
+        1
+      ]
+    },
+    {
       "slug": "tokyo",
       "display_name": "Tokyo",
       "coverage_note": "Toei network (Bureau of Transportation, Tokyo Metropolitan Government): the Asakusa, Mita, Shinjuku and Ōedo subway lines, the Tokyo Sakura Tram (Toden Arakawa Line), and the Nippori-Toneri Liner. Tokyo Metro and JR East (including the Yamanote Line) are NOT shown: their data licences prohibit public redistribution of a derived product, whereas Toei's feed is CC BY 4.0. Data: Bureau of Transportation, Tokyo Metropolitan Government, via the Public Transportation Open Data Center (odpt.org), CC BY 4.0.",
