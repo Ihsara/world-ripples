@@ -13,29 +13,29 @@
 // vehicle dots are interpolated in JS at playback (Option A) and impact dots
 // flash at a stop the instant its event fires.
 
-import { loadAll, makeCityCache } from "./data.js?v=f288c2c188";
-import { loadLife } from "./life.js?v=f288c2c188";
-import { cellAlpha, precomputeDeaths, precomputeLastMode } from "./lifeview.js?v=f288c2c188";
+import { loadAll, makeCityCache } from "./data.js?v=9849877899";
+import { loadLife } from "./life.js?v=9849877899";
+import { cellAlpha, precomputeDeaths, precomputeLastMode } from "./lifeview.js?v=9849877899";
 import { makeProjection, eventsInWindow, RippleField, realAge, clampSkip,
          rippleLifeHorizon, nextEventInView, whisperText,
-         normalizeStampIntensity } from "./field.js?v=f288c2c188";
-import { vehiclePosition } from "./vehicles.js?v=f288c2c188";
+         normalizeStampIntensity } from "./field.js?v=9849877899";
+import { vehiclePosition } from "./vehicles.js?v=9849877899";
 import { deriveCorridorWeights, buildCorridorGeometry, corridorWidth,
          corridorBrightness, edgeModeCounts, overlapColour, MODE_RANK,
-         COLOUR_MODES } from "./corridors.js?v=f288c2c188";
-import { lifeSimSec, vehicleStyleFor } from "./lifevehicles.js?v=f288c2c188";
+         COLOUR_MODES } from "./corridors.js?v=9849877899";
+import { lifeSimSec, vehicleStyleFor } from "./lifevehicles.js?v=9849877899";
 import { createCamera, cameraProjection, panBy, zoomAboutPoint, resizeCamera,
          startFlyTo, stepFlyTo, visibleBbox, viewWidthKm, projectInto,
-         inflateBbox, fitBboxScale } from "./camera.js?v=f288c2c188";
-import { createPlacePanel } from "./panel.js?v=f288c2c188";
-import { SEASONS } from "./solar.js?v=f288c2c188";
-import { makeSunState, parseSunLink } from "./sunstate.js?v=f288c2c188";
+         inflateBbox, fitBboxScale } from "./camera.js?v=9849877899";
+import { createPlacePanel } from "./panel.js?v=9849877899";
+import { SEASONS } from "./solar.js?v=9849877899";
+import { makeSunState, parseSunLink } from "./sunstate.js?v=9849877899";
 import { desertAvailable, desertLabel, drawDeserts, rankSubareas,
-         unpackDesertBits } from "./deserts.js?v=f288c2c188";
-import { findById, flattenTree } from "./places.js?v=f288c2c188";
-import { loadCities, resolveSlug } from "./cities.js?v=f288c2c188";
-import { exportFilename, capturePng, captureCommand, normalizeClock } from "./export.js?v=f288c2c188";
-import { CHROME_OVERLAY_IDS } from "./chrome.js?v=f288c2c188";
+         unpackDesertBits } from "./deserts.js?v=9849877899";
+import { findById, flattenTree } from "./places.js?v=9849877899";
+import { loadCities, resolveSlug } from "./cities.js?v=9849877899";
+import { exportFilename, capturePng, captureCommand, normalizeClock } from "./export.js?v=9849877899";
+import { CHROME_OVERLAY_IDS } from "./chrome.js?v=9849877899";
 
 // ---- AOI bboxes (lon/lat), mirrored from src/region.py EXACTLY -----------
 // Helsinki-specific subareas (fly-to chips + the guided intro's zoomed-in
@@ -1900,6 +1900,16 @@ async function initApp() {
         camera.scale = fitBboxScale(
           bbox, camera.w, camera.h, camera.margin, camera.kx);
         syncProjection();
+      },
+      // Animated camera move for cinematic captures. Deliberately NOT
+      // flyToBbox(): that hardcodes 600ms, and a shot plan chooses its own
+      // pacing per keyframe.
+      //
+      // No field clear and no sePtr resync, matching flyToBbox's own
+      // invariant (see its comment above): playback and camera are
+      // orthogonal, so the city keeps rippling while the camera travels.
+      flyTo(bbox, durationMs) {
+        flyAnim = startFlyTo(camera, bbox, durationMs);
       },
       seekClock(secondsSinceMidnight) {
         state.t = Math.min(dataMax, Math.max(

@@ -1,4 +1,4 @@
-import { hideChrome } from "./chrome.js?v=f288c2c188";
+import { hideChrome } from "./chrome.js?v=9849877899";
 
 function slugify(s) {
   return s.normalize("NFD").replace(/[̀-ͯ]/g, "")
