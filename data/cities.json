@@ -26,7 +26,12 @@
         5.07,
         52.43
       ],
-      "utc_offset_hours": [1, 2, 2, 1]
+      "utc_offset_hours": [
+        1,
+        2,
+        2,
+        1
+      ]
     },
     {
       "slug": "berlin",
@@ -53,12 +58,49 @@
         13.77,
         52.68
       ],
-      "utc_offset_hours": [1, 2, 2, 1]
+      "utc_offset_hours": [
+        1,
+        2,
+        2,
+        1
+      ]
+    },
+    {
+      "slug": "copenhagen",
+      "display_name": "Copenhagen",
+      "coverage_note": "Greater Copenhagen's public transport as published by Rejseplanen, the Danish national journey planner, clipped from the national feed to the capital region. All four Metro lines (M1-M4), the seven DSB S-tog lines (A, B, Bx, C, E, F, H), Movia's bus and S-bus network, the Hovedstadens Letbane light rail, Lokaltog and DSB regional rail, and the harbour ferries. S-tog and regional lines run beyond the framed area toward Hillerod, Koge and Roskilde. Data: Rejseplanen (rejseplanen.dk).",
+      "country": "Denmark",
+      "region_bbox": [
+        12.15,
+        55.53,
+        12.78,
+        55.82
+      ],
+      "subareas": {
+        "Copenhagen": [
+          12.05,
+          55.48,
+          12.85,
+          55.88
+        ]
+      },
+      "intro_bbox": [
+        12.15,
+        55.53,
+        12.78,
+        55.82
+      ],
+      "utc_offset_hours": [
+        1,
+        2,
+        2,
+        1
+      ]
     },
     {
       "slug": "helsinki",
       "display_name": "Helsinki",
-      "coverage_note": "HSL \u2014 complete Helsinki-region network",
+      "coverage_note": "HSL — complete Helsinki-region network",
       "country": "Finland",
       "region_bbox": [
         24.4,
@@ -98,12 +140,17 @@
         25.06,
         60.24
       ],
-      "utc_offset_hours": [2, 3, 3, 2]
+      "utc_offset_hours": [
+        2,
+        3,
+        3,
+        2
+      ]
     },
     {
       "slug": "madrid",
       "display_name": "Madrid",
-      "coverage_note": "Madrid's public transport: all 13 Metro de Madrid lines, the four Metro Ligero light-rail lines, the EMT Madrid city bus network, and CRTM's urban bus services for the surrounding municipalities. TWO GAPS, both from the source data rather than from this map. Cercan\u00edas commuter rail is ABSENT: CRTM's feed for it contains no trips at all (10 routes and 97 stops, but an empty timetable, last published in August 2024), so there is nothing to animate. And the Metro timetable is DATED: CRTM last published its Metro feed in May 2025 and has not updated it since, while the bus and light-rail feeds are current to July 2026. The metro's lines, stations, frequencies and running times are complete and exactly as CRTM published them; only the timetable's vintage is older than the rest of the map. Line ML4, the Tranv\u00eda de Parla, is also not shown \u2014 it is a self-contained circular tram in Parla, some 20 km south, sharing no stops with the Madrid network. Powered by CRTM (https://www.crtm.es) and Powered by EMT de Madrid.",
+      "coverage_note": "Madrid's public transport: all 13 Metro de Madrid lines, the four Metro Ligero light-rail lines, the EMT Madrid city bus network, and CRTM's urban bus services for the surrounding municipalities. TWO GAPS, both from the source data rather than from this map. Cercanías commuter rail is ABSENT: CRTM's feed for it contains no trips at all (10 routes and 97 stops, but an empty timetable, last published in August 2024), so there is nothing to animate. And the Metro timetable is DATED: CRTM last published its Metro feed in May 2025 and has not updated it since, while the bus and light-rail feeds are current to July 2026. The metro's lines, stations, frequencies and running times are complete and exactly as CRTM published them; only the timetable's vintage is older than the rest of the map. Line ML4, the Tranvía de Parla, is also not shown — it is a self-contained circular tram in Parla, some 20 km south, sharing no stops with the Madrid network. Powered by CRTM (https://www.crtm.es) and Powered by EMT de Madrid.",
       "country": "Spain",
       "region_bbox": [
         -3.92,
@@ -125,7 +172,12 @@
         -3.44,
         40.58
       ],
-      "utc_offset_hours": [1, 2, 2, 1]
+      "utc_offset_hours": [
+        1,
+        2,
+        2,
+        1
+      ]
     },
     {
       "slug": "milan",
@@ -152,12 +204,17 @@
         9.5,
         45.68
       ],
-      "utc_offset_hours": [1, 2, 2, 1]
+      "utc_offset_hours": [
+        1,
+        2,
+        2,
+        1
+      ]
     },
     {
       "slug": "nyc",
       "display_name": "New York City",
-      "coverage_note": "MTA New York City Transit subway (regular schedule) and Staten Island Railway; Long Island Rail Road; Metro-North Railroad; NYCT local bus for all five boroughs (Bronx, Brooklyn, Manhattan, Queens, Staten Island); MTA Bus Company. Rail-outage shuttle buses (GTFS route_type 711) are folded into the bus mode alongside classic local buses; the Staten Island Railway (route_type 2, ships inside the subway feed) is shown as train, not metro. NOTE ON TIME WINDOW: the other cities animate a four-hour morning window (06:00-10:00); New York animates a shorter 90-minute morning-rush slice (06:00-07:30), anchored at the same 06:00 start, because the full federated nine-feed network exceeds the 25 MiB size budget over the longer window. No stops, routes, modes or feeds are dropped \u2014 every one of the nine MTA operators is fully represented; only the span of time SHOWN is shorter than the other cities'. Data: Metropolitan Transportation Authority, https://www.mta.info/developers.",
+      "coverage_note": "MTA New York City Transit subway (regular schedule) and Staten Island Railway; Long Island Rail Road; Metro-North Railroad; NYCT local bus for all five boroughs (Bronx, Brooklyn, Manhattan, Queens, Staten Island); MTA Bus Company. Rail-outage shuttle buses (GTFS route_type 711) are folded into the bus mode alongside classic local buses; the Staten Island Railway (route_type 2, ships inside the subway feed) is shown as train, not metro. NOTE ON TIME WINDOW: the other cities animate a four-hour morning window (06:00-10:00); New York animates a shorter 90-minute morning-rush slice (06:00-07:30), anchored at the same 06:00 start, because the full federated nine-feed network exceeds the 25 MiB size budget over the longer window. No stops, routes, modes or feeds are dropped — every one of the nine MTA operators is fully represented; only the span of time SHOWN is shorter than the other cities'. Data: Metropolitan Transportation Authority, https://www.mta.info/developers.",
       "country": "United States",
       "region_bbox": [
         -74.26,
@@ -179,7 +236,12 @@
         -73.93,
         40.88
       ],
-      "utc_offset_hours": [-4, -4, -4, -5]
+      "utc_offset_hours": [
+        -4,
+        -4,
+        -4,
+        -5
+      ]
     },
     {
       "slug": "oslo",
@@ -206,12 +268,17 @@
         11.0,
         60.05
       ],
-      "utc_offset_hours": [1, 2, 2, 1]
+      "utc_offset_hours": [
+        1,
+        2,
+        2,
+        1
+      ]
     },
     {
       "slug": "porto",
       "display_name": "Porto",
-      "coverage_note": "Porto's public transport: the STCP city bus network and all seven Metro do Porto light-rail lines (A-F and Bx), including the B line's coastal run north to P\u00f3voa de Varzim. Suburban and regional trains are NOT included: CP's feed carries no licence permitting redistribution, so Porto's Campanh\u00e3 and S\u00e3o Bento rail services are absent from this map. Data from Porto Open Data (opendata.porto.digital), published by STCP and Metro do Porto under CC0 / Dom\u00ednio P\u00fablico.",
+      "coverage_note": "Porto's public transport: the STCP city bus network and all seven Metro do Porto light-rail lines (A-F and Bx), including the B line's coastal run north to Póvoa de Varzim. Suburban and regional trains are NOT included: CP's feed carries no licence permitting redistribution, so Porto's Campanhã and São Bento rail services are absent from this map. Data from Porto Open Data (opendata.porto.digital), published by STCP and Metro do Porto under CC0 / Domínio Público.",
       "country": "Portugal",
       "region_bbox": [
         -8.71,
@@ -233,12 +300,17 @@
         -8.5,
         41.25
       ],
-      "utc_offset_hours": [0, 1, 1, 0]
+      "utc_offset_hours": [
+        0,
+        1,
+        1,
+        0
+      ]
     },
     {
       "slug": "tokyo",
       "display_name": "Tokyo",
-      "coverage_note": "Toei network (Bureau of Transportation, Tokyo Metropolitan Government): the Asakusa, Mita, Shinjuku and \u014cedo subway lines, the Tokyo Sakura Tram (Toden Arakawa Line), and the Nippori-Toneri Liner. Tokyo Metro and JR East (including the Yamanote Line) are NOT shown: their data licences prohibit public redistribution of a derived product, whereas Toei's feed is CC BY 4.0. Data: Bureau of Transportation, Tokyo Metropolitan Government, via the Public Transportation Open Data Center (odpt.org), CC BY 4.0.",
+      "coverage_note": "Toei network (Bureau of Transportation, Tokyo Metropolitan Government): the Asakusa, Mita, Shinjuku and Ōedo subway lines, the Tokyo Sakura Tram (Toden Arakawa Line), and the Nippori-Toneri Liner. Tokyo Metro and JR East (including the Yamanote Line) are NOT shown: their data licences prohibit public redistribution of a derived product, whereas Toei's feed is CC BY 4.0. Data: Bureau of Transportation, Tokyo Metropolitan Government, via the Public Transportation Open Data Center (odpt.org), CC BY 4.0.",
       "country": "Japan",
       "region_bbox": [
         139.6,
@@ -260,7 +332,12 @@
         139.95,
         35.83
       ],
-      "utc_offset_hours": [9, 9, 9, 9]
+      "utc_offset_hours": [
+        9,
+        9,
+        9,
+        9
+      ]
     },
     {
       "slug": "vienna",
@@ -287,7 +364,12 @@
         16.58,
         48.33
       ],
-      "utc_offset_hours": [1, 2, 2, 1]
+      "utc_offset_hours": [
+        1,
+        2,
+        2,
+        1
+      ]
     },
     {
       "slug": "warsaw",
@@ -314,12 +396,17 @@
         21.464,
         52.494
       ],
-      "utc_offset_hours": [1, 2, 2, 1]
+      "utc_offset_hours": [
+        1,
+        2,
+        2,
+        1
+      ]
     },
     {
       "slug": "zurich",
-      "display_name": "Z\u00fcrich",
-      "coverage_note": "Swiss national GTFS timetable, clipped to the Z\u00fcrich metro area. S-Bahn, tram, bus and lake boats; funiculars and aerial cableways are shown as rail. Data: Open data platform mobility Switzerland (opentransportdata.swiss), published by SBB on behalf of the Swiss Federal Office of Transport.",
+      "display_name": "Zürich",
+      "coverage_note": "Swiss national GTFS timetable, clipped to the Zürich metro area. S-Bahn, tram, bus and lake boats; funiculars and aerial cableways are shown as rail. Data: Open data platform mobility Switzerland (opentransportdata.swiss), published by SBB on behalf of the Swiss Federal Office of Transport.",
       "country": "Switzerland",
       "region_bbox": [
         8.4,
@@ -328,7 +415,7 @@
         47.46
       ],
       "subareas": {
-        "Z\u00fcrich": [
+        "Zürich": [
           8.4,
           47.3,
           8.68,
@@ -341,7 +428,12 @@
         8.68,
         47.46
       ],
-      "utc_offset_hours": [1, 2, 2, 1]
+      "utc_offset_hours": [
+        1,
+        2,
+        2,
+        1
+      ]
     }
   ]
 }
