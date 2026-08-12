@@ -1,5 +1,5 @@
 // field.js — pure playback helpers (Task 6) + WebGL field (Task 7).
-import { DEFAULT_RGB } from "./sunlight.js?v=0dad9d5858";
+import { DEFAULT_RGB } from "./sunlight.js?v=8e85a8ef6c";
 export function makeProjection(bbox, w, h, margin) {
   const m = margin || 10;
   const latMid = (bbox.minY + bbox.maxY) / 2;
@@ -115,6 +115,11 @@ out vec4 o; void main(){ o = texture(tex, uv) * k; }`;
 // blown-out white blob — they read as a brighter, more saturated mode color.
 // Tune here (single source of truth for the present shader).
 const GLOW_STRENGTH = 2.2;
+// PULSE_WIDTH_PX — the travelling head's stroke width. Sits between the static
+// corridor's 0.9 px floor and its ~4.2 px heaviest metro trunk, so a pulse reads
+// as a bright thing moving ALONG a corridor rather than as a second, fatter
+// corridor drawn over the first.
+const PULSE_WIDTH_PX = 2.2;
 const PRESENT_FS = `#version 300 es
 precision highp float; in vec2 uv; uniform sampler2D tex; uniform float glowStrength;
 uniform vec3 uBase;
@@ -182,8 +187,9 @@ void main(){ vec2 d = gl_PointCoord - vec2(0.5); float r = length(d);
   float a = smoothstep(0.5, 0.0, r); o = vec4(vCol.rgb * a * vCol.a, a * vCol.a); }`;
 
 const CORRIDOR_VS = `#version 300 es
-in vec2 a; in vec2 b;
+in vec2 a; in vec2 b; in float distA; in float distB;
 uniform vec2 projScale, projOffset, res; uniform float width;
+out float vDist;
 void main(){
   const vec2 corners[6] = vec2[6](
     vec2(0.0,-1.0), vec2(0.0,1.0), vec2(1.0,-1.0),
@@ -193,11 +199,14 @@ void main(){
   vec2 d=pb-pa; float len=max(length(d),0.0001);
   vec2 normal=vec2(-d.y,d.x)/len;
   vec2 p=mix(pa,pb,corner.x)+normal*corner.y*width*0.5;
+  vDist=mix(distA,distB,corner.x);
   vec2 c=(p/res)*2.0-1.0; gl_Position=vec4(c.x,-c.y,0.0,1.0);
 }`;
 const CORRIDOR_FS = `#version 300 es
-precision highp float; uniform vec3 color; uniform float brightness; out vec4 o;
-void main(){ o=vec4(color*brightness,brightness); }`;
+precision highp float; uniform vec3 color; uniform float brightness;
+uniform float headDist; uniform float tailLen; in float vDist; out vec4 o;
+void main(){ float pulse=headDist < 0.0 ? 1.0 : smoothstep(0.0,tailLen,vDist);
+  o=vec4(color*brightness*pulse,brightness*pulse); }`;
 
 function compile(gl, vs, fs) {
   const p = gl.createProgram();
@@ -229,8 +238,8 @@ export class RippleField {
     this.delayBuf = gl.createBuffer(); this.ageBuf = gl.createBuffer();
     this.intenBuf = gl.createBuffer();
     this.ptBuf = gl.createBuffer(); this.ptColBuf = gl.createBuffer();
-    this.corridorBuf = gl.createBuffer(); this.corridorBatches = [];
-    this._segCap = 0; this._delayCap = 0; this._ageCap = 0; this._intenCap = 0;
+    this.corridorBuf = gl.createBuffer(); this.pulseBuf = gl.createBuffer(); this.corridorBatches = [];
+    this._segCap = 0; this._delayCap = 0; this._ageCap = 0; this._intenCap = 0; this._pulseCap = 0;
 
     // Task 12 perf gate: cache all uniform/attribute locations ONCE per
     // program right after linking, instead of calling getUniformLocation /
@@ -278,8 +287,12 @@ export class RippleField {
       width: gl.getUniformLocation(this.corridorP, "width"),
       color: gl.getUniformLocation(this.corridorP, "color"),
       brightness: gl.getUniformLocation(this.corridorP, "brightness"),
+      headDist: gl.getUniformLocation(this.corridorP, "headDist"),
+      tailLen: gl.getUniformLocation(this.corridorP, "tailLen"),
       a: gl.getAttribLocation(this.corridorP, "a"),
       b: gl.getAttribLocation(this.corridorP, "b"),
+      distA: gl.getAttribLocation(this.corridorP, "distA"),
+      distB: gl.getAttribLocation(this.corridorP, "distB"),
     };
   }
   _alloc(w, h) {
@@ -412,6 +425,9 @@ export class RippleField {
     gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE); gl.useProgram(this.corridorP);
     gl.uniform2f(loc.projScale, p1[0]-p0[0], p1[1]-p0[1]);
     gl.uniform2f(loc.projOffset, p0[0], p0[1]); gl.uniform2f(loc.res, this.w, this.h);
+    gl.disableVertexAttribArray(loc.distA); gl.vertexAttrib1f(loc.distA, 0);
+    gl.disableVertexAttribArray(loc.distB); gl.vertexAttrib1f(loc.distB, 0);
+    gl.uniform1f(loc.headDist, -1); gl.uniform1f(loc.tailLen, 1);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.corridorBuf);
     const stride = 4 * 4;
     for (const attr of [loc.a, loc.b]) {
@@ -430,6 +446,55 @@ export class RippleField {
     // Attribute divisors are global WebGL state; later ripple programs reuse
     // these numeric slots for ordinary per-vertex attributes.
     gl.vertexAttribDivisor(loc.a, 0); gl.vertexAttribDivisor(loc.b, 0);
+  }
+  // drawPulses — the travelling heads (edgepulse.js), drawn with the SAME
+  // program as the static corridors. The corridor shader already builds a quad
+  // per segment from `a`/`b`; a pulse only adds a per-vertex distance so the
+  // fragment stage can fade the tail out behind the head. Reusing the program
+  // keeps this to one extra draw call per mode.
+  //
+  // `vertices` is the caller's scratch buffer and `floatCount` is how much of it
+  // is live this frame, so the buffer is uploaded by bufferSubData into a
+  // grow-only VBO rather than reallocated per frame.
+  drawPulses(vertices, floatCount, projection, color, tailLen, brightness) {
+    if (!floatCount) return;
+    const gl = this.gl, loc = this.corridorLoc;
+    const p0 = projection.fn(0, 0), p1 = projection.fn(1, 1);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo[this.cur]);
+    gl.viewport(0, 0, this.w, this.h);
+    gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE); gl.useProgram(this.corridorP);
+    gl.uniform2f(loc.projScale, p1[0]-p0[0], p1[1]-p0[1]);
+    gl.uniform2f(loc.projOffset, p0[0], p0[1]); gl.uniform2f(loc.res, this.w, this.h);
+    gl.uniform1f(loc.width, PULSE_WIDTH_PX);
+    gl.uniform3fv(loc.color, color); gl.uniform1f(loc.brightness, brightness);
+    // headDist >= 0 selects the pulse branch in CORRIDOR_FS (the static corridor
+    // pass passes -1 to keep its flat, un-faded look).
+    gl.uniform1f(loc.headDist, tailLen); gl.uniform1f(loc.tailLen, tailLen);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.pulseBuf);
+    const need = floatCount * 4;
+    if (this._pulseCap < need) {
+      let cap = Math.max(this._pulseCap, 4096);
+      while (cap < need) cap *= 2;
+      gl.bufferData(gl.ARRAY_BUFFER, cap, gl.DYNAMIC_DRAW);
+      this._pulseCap = cap;
+    }
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, vertices, 0, floatCount);
+
+    // One instance per [ax,ay,bx,by,distA,distB] segment = 24 bytes.
+    const stride = 24;
+    for (const attr of [loc.a, loc.b, loc.distA, loc.distB]) {
+      gl.enableVertexAttribArray(attr);
+      gl.vertexAttribDivisor(attr, 1);
+    }
+    gl.vertexAttribPointer(loc.a, 2, gl.FLOAT, false, stride, 0);
+    gl.vertexAttribPointer(loc.b, 2, gl.FLOAT, false, stride, 8);
+    gl.vertexAttribPointer(loc.distA, 1, gl.FLOAT, false, stride, 16);
+    gl.vertexAttribPointer(loc.distB, 1, gl.FLOAT, false, stride, 20);
+    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, floatCount / 6);
+    // Restore the divisors: drawCorridors and the stamp passes share these
+    // attribute slots (see the note in drawCorridors).
+    for (const attr of [loc.a, loc.b, loc.distA, loc.distB]) gl.vertexAttribDivisor(attr, 0);
   }
   clearField() {
     const gl = this.gl;
@@ -457,12 +522,12 @@ export class RippleField {
     }
     this.decayP = this.presentP = this.stampP = this.pointP = this.corridorP = null;
     for (const b of [this.quad, this.segBuf, this.intBuf, this.delayBuf,
-                     this.ageBuf, this.ptBuf, this.ptColBuf, this.corridorBuf]) {
+                     this.ageBuf, this.ptBuf, this.ptColBuf, this.corridorBuf, this.pulseBuf]) {
       if (b) gl.deleteBuffer(b);
     }
     this.quad = this.segBuf = this.intBuf = this.delayBuf =
-      this.ageBuf = this.ptBuf = this.ptColBuf = this.corridorBuf = null;
-    this._segCap = 0; this._delayCap = 0; this._ageCap = 0;
+      this.ageBuf = this.ptBuf = this.ptColBuf = this.corridorBuf = this.pulseBuf = null;
+    this._segCap = 0; this._delayCap = 0; this._ageCap = 0; this._pulseCap = 0;
     if (this.tex) for (const t of this.tex) gl.deleteTexture(t);
     if (this.fbo) for (const f of this.fbo) gl.deleteFramebuffer(f);
     this.tex = null; this.fbo = null;

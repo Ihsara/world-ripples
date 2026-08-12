@@ -13,30 +13,32 @@
 // vehicle dots are interpolated in JS at playback (Option A) and impact dots
 // flash at a stop the instant its event fires.
 
-import { loadAll, makeCityCache } from "./data.js?v=0dad9d5858";
-import { loadLife } from "./life.js?v=0dad9d5858";
-import { cellAlpha, precomputeDeaths, precomputeLastMode } from "./lifeview.js?v=0dad9d5858";
+import { loadAll, makeCityCache } from "./data.js?v=8e85a8ef6c";
+import { loadLife } from "./life.js?v=8e85a8ef6c";
+import { cellAlpha, precomputeDeaths, precomputeLastMode } from "./lifeview.js?v=8e85a8ef6c";
 import { makeProjection, eventsInWindow, RippleField, realAge, clampSkip,
          rippleLifeHorizon, nextEventInView, whisperText,
-         normalizeStampIntensity } from "./field.js?v=0dad9d5858";
-import { vehiclePosition } from "./vehicles.js?v=0dad9d5858";
+         normalizeStampIntensity } from "./field.js?v=8e85a8ef6c";
+import { vehiclePosition } from "./vehicles.js?v=8e85a8ef6c";
+import { activeLegs, pulseGeometry, pulseHeadPoint, PULSE_BUDGET,
+         PULSE_TAIL } from "./edgepulse.js?v=8e85a8ef6c";
 import { deriveCorridorWeights, buildCorridorGeometry, corridorWidth,
          corridorBrightness, edgeModeCounts, overlapColour, MODE_RANK,
-         COLOUR_MODES } from "./corridors.js?v=0dad9d5858";
-import { lifeSimSec, vehicleStyleFor } from "./lifevehicles.js?v=0dad9d5858";
+         COLOUR_MODES } from "./corridors.js?v=8e85a8ef6c";
+import { lifeSimSec, vehicleStyleFor } from "./lifevehicles.js?v=8e85a8ef6c";
 import { createCamera, cameraProjection, panBy, zoomAboutPoint, resizeCamera,
          startFlyTo, stepFlyTo, visibleBbox, viewWidthKm, projectInto,
-         inflateBbox, fitBboxScale } from "./camera.js?v=0dad9d5858";
-import { createPlacePanel } from "./panel.js?v=0dad9d5858";
-import { SEASONS } from "./solar.js?v=0dad9d5858";
-import { makeSunState, parseSunLink } from "./sunstate.js?v=0dad9d5858";
+         inflateBbox, fitBboxScale } from "./camera.js?v=8e85a8ef6c";
+import { createPlacePanel } from "./panel.js?v=8e85a8ef6c";
+import { SEASONS } from "./solar.js?v=8e85a8ef6c";
+import { makeSunState, parseSunLink } from "./sunstate.js?v=8e85a8ef6c";
 import { desertAvailable, desertLabel, drawDeserts, rankSubareas,
-         unpackDesertBits } from "./deserts.js?v=0dad9d5858";
-import { findById, flattenTree } from "./places.js?v=0dad9d5858";
-import { loadCities, resolveSlug } from "./cities.js?v=0dad9d5858";
-import { exportFilename, capturePng, captureCommand, normalizeClock } from "./export.js?v=0dad9d5858";
-import { CHROME_OVERLAY_IDS } from "./chrome.js?v=0dad9d5858";
-import { pickView } from "./viewswitch.js?v=0dad9d5858";
+         unpackDesertBits } from "./deserts.js?v=8e85a8ef6c";
+import { findById, flattenTree } from "./places.js?v=8e85a8ef6c";
+import { loadCities, resolveSlug } from "./cities.js?v=8e85a8ef6c";
+import { exportFilename, capturePng, captureCommand, normalizeClock } from "./export.js?v=8e85a8ef6c";
+import { CHROME_OVERLAY_IDS } from "./chrome.js?v=8e85a8ef6c";
+import { pickView } from "./viewswitch.js?v=8e85a8ef6c";
 
 // ---- AOI bboxes (lon/lat), mirrored from src/region.py EXACTLY -----------
 // Helsinki-specific subareas (fly-to chips + the guided intro's zoomed-in
@@ -90,6 +92,15 @@ const DATA_ROOT =
     : "./data";
 const dataDirFor = (slug) => `${DATA_ROOT}/${slug}`;
 const SPAWN_BUDGET = 200; // max stamped events per frame, even at 300x
+// PULSE_BRIGHTNESS — additive light added by a travelling head.
+//
+// TUNED AGAINST THE LIVE FRAME, not guessed. The first value (0.12) was ~5x the
+// static corridor's 0.025 + 0.025*log2(w) ramp, and at Helsinki morning rush the
+// pulses stopped reading as heads and became thick ribbons that outshone the
+// ripple blooms — exactly the "corridors must not drown the subject" risk the
+// design note flagged. The ripple is the subject; a pulse is the thing that
+// DELIVERS a ripple, so it must sit just above the silhouette and below a bloom.
+const PULSE_BRIGHTNESS = 0.05;
 
 // The speed ladder. Stepping (not 4 chips) keeps the bar to one row and scales
 // if a speed is ever added. Clamps rather than wraps: wrapping from 300x back
@@ -716,6 +727,23 @@ async function initApp() {
     shapeCoords: d.vehicleShapeCoords, shapeCumdist: d.vehicleShapeCumdist,
     bpTime: d.vehicleTripBpTime, bpDist: d.vehicleTripBpDist,
   } : null;
+  // One caller-owned hot-loop buffer, reused by all five mode passes rather
+  // than allocating a Float32Array per pulse (or per frame).
+  //
+  // SIZING, measured on the shipped Helsinki bundle (908 routes scanned): a
+  // 250 m tail spans 4.5 shape vertices on average and 8 at the very worst, so
+  // a pulse is a handful of segments, not a long strip. PULSE_BUDGET is the
+  // whole-city peak BEFORE viewport culling, and only pulses that survive the
+  // cull are ever written, so sizing the full budget at the WORST-case segment
+  // count is already generous and still costs well under a megabyte.
+  //
+  // pulseGeometry stops at the array bound rather than overrunning it, so an
+  // undersized buffer degrades to a dropped pulse, never to corruption.
+  const PULSE_SEGMENTS_WORST = 8;
+  const pulseScratch = new Float32Array(PULSE_BUDGET * PULSE_SEGMENTS_WORST * 6);
+  // Per-mode leg buckets, allocated once and emptied (length = 0) each frame so
+  // the hot loop never allocates. Indexed by mode code, matching MODE_COLORS.
+  const pulseByMode = MODE_COLORS.map(() => []);
 
   // ---- Life mode: lazy load + decode (Task 2, extended Task 5) -------------
   // Life covers every subarea the city's manifest declares -- the same extent
@@ -2950,6 +2978,54 @@ async function initApp() {
     // Persistent network silhouette first; animated ripples and dots retain
     // visual priority because every later pass additively draws over it.
     field.drawCorridors(state.proj, corridorColors, corridorWidth, corridorBrightness);
+
+    // Travelling heads sit above the static silhouette but below ripple
+    // restamps. Older bundles leave vehData null and retain the old rendering.
+    if (vehData) {
+      const legs = activeLegs(vehData.trips, vehData.bpTime, state.t, PULSE_BUDGET);
+      const bb = viewBbox();
+      // Bucket the legs by mode in ONE pass, then draw each bucket.
+      //
+      // The obvious shape -- loop the modes on the outside and filter the legs
+      // inside -- walks the whole active-leg list five times and calls
+      // pulseHeadPoint (a binary search plus an interpolation) on every leg in
+      // every pass, discarding ~80% of that work to the mode test. At the
+      // measured peak that is ~27,870 head computations per frame instead of
+      // 5,574, and it MEASURABLY doubled frame time (1073ms -> 2292ms in the
+      // headless comparison against master). Cull once, bucket once.
+      for (const bucket of pulseByMode) bucket.length = 0;
+      for (const leg of legs) {
+        const route = vehData.routes[leg.trip.shape];
+        if (!route) continue;
+        const mode = MODE_CODE(route.mode);
+        const bucket = pulseByMode[mode];
+        if (!bucket) continue;
+        // Cull BEFORE writing. Culling after the write (on the emitted head
+        // vertex) is correct on screen but spends buffer on pulses it then
+        // rewinds, so a wide view can exhaust the scratch on off-screen legs
+        // and silently drop visible ones. The head position is derivable
+        // without emitting geometry, so test it first and write nothing for
+        // a pulse that cannot be seen.
+        const head = pulseHeadPoint(leg, state.t, vehData);
+        if (!head) continue;
+        if (head[0] < bb[0] || head[0] > bb[2] || head[1] < bb[1] || head[1] > bb[3]) continue;
+        bucket.push(leg);
+      }
+      for (let mode = 0; mode < MODE_COLORS.length; mode++) {
+        const bucket = pulseByMode[mode];
+        if (!bucket || !bucket.length) continue;
+        let used = 0;
+        for (const leg of bucket) {
+          const before = used;
+          used = pulseGeometry(leg, state.t, vehData, pulseScratch, used, PULSE_TAIL);
+          // pulseGeometry stops at the bound rather than overrunning it, so a
+          // full buffer shows up as "no progress", not as used > length.
+          if (used === before) break;
+        }
+        field.drawPulses(pulseScratch, used, state.proj, MODE_COLORS[mode],
+                         PULSE_TAIL, PULSE_BRIGHTNESS);
+      }
+    }
 
     resetModeScratch();
 
