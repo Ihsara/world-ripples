@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Cities, breathing in light</title><link rel="stylesheet" href="app.css?v=8e85a8ef6c"></head>
+<title>Cities, breathing in light</title><link rel="stylesheet" href="app.css?v=963df69525"></head>
 <body>
 <canvas id="map"></canvas>
 <canvas id="overlay"></canvas>
@@ -58,6 +58,12 @@
      declares any, so the twelve cities without views show no new UI at all.
      Stacked below #sun-rail on the same left edge, same rail language. -->
 <div id="view-rail" role="group" aria-label="Spatial view" hidden></div>
+
+<!-- Transport filter. Not a mode-rail entry: the mode rail switches VIEWS
+     (ripples / life / deserts), while this filters what is drawn within a
+     view. Buttons are built at runtime from the modes the active city
+     actually runs, so this ships empty. -->
+<div id="mode-filter" role="group" aria-label="Transport modes" hidden></div>
 
 <div id="intro" role="dialog" aria-modal="true" aria-labelledby="intro-title">
   <div id="intro-card">
@@ -234,5 +240,5 @@
      part of the interface. -->
 <div id="status" hidden></div>
 <div id="loading" hidden>Loading…</div>
-<script type="module" src="app.js?v=8e85a8ef6c"></script>
+<script type="module" src="app.js?v=963df69525"></script>
 </body></html>

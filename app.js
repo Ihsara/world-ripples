@@ -13,32 +13,34 @@
 // vehicle dots are interpolated in JS at playback (Option A) and impact dots
 // flash at a stop the instant its event fires.
 
-import { loadAll, makeCityCache } from "./data.js?v=8e85a8ef6c";
-import { loadLife } from "./life.js?v=8e85a8ef6c";
-import { cellAlpha, precomputeDeaths, precomputeLastMode } from "./lifeview.js?v=8e85a8ef6c";
+import { loadAll, makeCityCache } from "./data.js?v=963df69525";
+import { loadLife } from "./life.js?v=963df69525";
+import { cellAlpha, precomputeDeaths, precomputeLastMode } from "./lifeview.js?v=963df69525";
 import { makeProjection, eventsInWindow, RippleField, realAge, clampSkip,
          rippleLifeHorizon, nextEventInView, whisperText,
-         normalizeStampIntensity } from "./field.js?v=8e85a8ef6c";
-import { vehiclePosition } from "./vehicles.js?v=8e85a8ef6c";
+         normalizeStampIntensity } from "./field.js?v=963df69525";
+import { vehiclePosition } from "./vehicles.js?v=963df69525";
 import { activeLegs, pulseGeometry, pulseHeadPoint, PULSE_BUDGET,
-         PULSE_TAIL } from "./edgepulse.js?v=8e85a8ef6c";
+         PULSE_TAIL } from "./edgepulse.js?v=963df69525";
 import { deriveCorridorWeights, buildCorridorGeometry, corridorWidth,
          corridorBrightness, edgeModeCounts, overlapColour, MODE_RANK,
-         COLOUR_MODES } from "./corridors.js?v=8e85a8ef6c";
-import { lifeSimSec, vehicleStyleFor } from "./lifevehicles.js?v=8e85a8ef6c";
+         COLOUR_MODES } from "./corridors.js?v=963df69525";
+import { lifeSimSec, vehicleStyleFor } from "./lifevehicles.js?v=963df69525";
 import { createCamera, cameraProjection, panBy, zoomAboutPoint, resizeCamera,
          startFlyTo, stepFlyTo, visibleBbox, viewWidthKm, projectInto,
-         inflateBbox, fitBboxScale } from "./camera.js?v=8e85a8ef6c";
-import { createPlacePanel } from "./panel.js?v=8e85a8ef6c";
-import { SEASONS } from "./solar.js?v=8e85a8ef6c";
-import { makeSunState, parseSunLink } from "./sunstate.js?v=8e85a8ef6c";
+         inflateBbox, fitBboxScale } from "./camera.js?v=963df69525";
+import { createPlacePanel } from "./panel.js?v=963df69525";
+import { SEASONS } from "./solar.js?v=963df69525";
+import { makeSunState, parseSunLink } from "./sunstate.js?v=963df69525";
 import { desertAvailable, desertLabel, drawDeserts, rankSubareas,
-         unpackDesertBits } from "./deserts.js?v=8e85a8ef6c";
-import { findById, flattenTree } from "./places.js?v=8e85a8ef6c";
-import { loadCities, resolveSlug } from "./cities.js?v=8e85a8ef6c";
-import { exportFilename, capturePng, captureCommand, normalizeClock } from "./export.js?v=8e85a8ef6c";
-import { CHROME_OVERLAY_IDS } from "./chrome.js?v=8e85a8ef6c";
-import { pickView } from "./viewswitch.js?v=8e85a8ef6c";
+         unpackDesertBits } from "./deserts.js?v=963df69525";
+import { findById, flattenTree } from "./places.js?v=963df69525";
+import { loadCities, resolveSlug } from "./cities.js?v=963df69525";
+import { exportFilename, capturePng, captureCommand, normalizeClock } from "./export.js?v=963df69525";
+import { CHROME_OVERLAY_IDS } from "./chrome.js?v=963df69525";
+import { pickView } from "./viewswitch.js?v=963df69525";
+import { MODE_NAMES, newVisibility, isVisible, setVisible, hiddenModeNames,
+         presentModes } from "./modefilter.js?v=963df69525";
 
 // ---- AOI bboxes (lon/lat), mirrored from src/region.py EXACTLY -----------
 // Helsinki-specific subareas (fly-to chips + the guided intro's zoomed-in
@@ -427,6 +429,7 @@ async function initApp() {
   const sunSeasonEls = document.querySelectorAll("#sun-seasons button[data-season]");
   const viewRailEl = document.getElementById("view-rail");
   const modeDesertsEl = document.getElementById("mode-deserts");
+  const modeFilterEl = document.getElementById("mode-filter");
   const helpBtnEl = document.getElementById("help-btn");
   const creditsBtnEl = document.getElementById("credits-btn");
   const creditsEl = document.getElementById("credits");
@@ -954,6 +957,11 @@ async function initApp() {
     // "additive" | "identity" | "overlap" — see corridors.js COLOUR_MODES.
     // Defaults to the shipped additive behaviour so this is opt-in.
     colourMode: "additive",
+    // Per-mode visibility for the ripple view, indexed by mode code.
+    // The SINGLE source of truth -- every draw site reads this array directly
+    // rather than keeping its own copy, so a toggle can never drift out of sync
+    // with what is drawn.
+    modeVisible: newVisibility(),
     district: null, // null | place-tree node {id, name, bbox, ring} — the highlighted place
     sePtr: 0,
     proj: null,
@@ -1124,6 +1132,42 @@ async function initApp() {
   const corridorColors = Object.fromEntries(Object.entries(manifest.mode_codes || {})
     .map(([mode, code]) => [mode, MODE_COLORS[code]]));
 
+  // The mode filter must gate the static corridor silhouette too, or hiding
+  // bus removes its wavefronts/dots/flashes but leaves the bus NETWORK still
+  // lit underneath -- a visible lie about what the filter does. field.js's
+  // drawCorridors skips any batch whose mode key is absent from the colours
+  // object it is given (web/field.js:438), so filtering is just a matter of
+  // handing it a colours object missing the hidden modes' keys.
+  //
+  // corridorColors above is memoised ONCE per bundle and reused every frame
+  // -- mutating it in place would be unrecoverable the moment a mode is
+  // re-shown. This derives a second, filtered view instead, and caches it
+  // keyed by a snapshot of state.modeVisible so an unchanged filter (the
+  // overwhelmingly common case: every frame between two clicks) costs one
+  // cheap byte-array comparison rather than rebuilding an object.
+  let visibleCorridorColorsCache = null;
+  let visibleCorridorColorsSig = null;
+  function visibleCorridorColors() {
+    const vis = state.modeVisible;
+    // The length check is belt-and-braces: newVisibility() always returns a
+    // Uint8Array of exactly MODE_NAMES.length, so the signature and `vis` are
+    // the same fixed size today. Without it, though, `every` is asymmetric --
+    // a signature SHORTER than `vis` would compare only its own entries and
+    // report a stale cache as fresh, which is a silently-wrong frame rather
+    // than a crash. Cheap enough to not depend on that invariant holding.
+    if (visibleCorridorColorsSig && visibleCorridorColorsSig.length === vis.length &&
+        visibleCorridorColorsSig.every((v, i) => v === vis[i])) {
+      return visibleCorridorColorsCache;
+    }
+    visibleCorridorColorsCache = {};
+    for (const [mode, color] of Object.entries(corridorColors)) {
+      const code = MODE_NAMES.indexOf(mode);
+      if (code < 0 || isVisible(vis, code)) visibleCorridorColorsCache[mode] = color;
+    }
+    visibleCorridorColorsSig = Uint8Array.from(vis);
+    return visibleCorridorColorsCache;
+  }
+
   // Per-edge colour-mode lookups, computed ONCE per bundle (not per frame).
   // `edgeWinner[e]` = the mode CODE that owns edge e under identity mode;
   // `edgeModeN[e]`  = how many distinct modes serve edge e, for overlap mode.
@@ -1220,6 +1264,39 @@ async function initApp() {
     syncProjection();
   }
   window.addEventListener("resize", () => fitProjection(), { signal: abort.signal });
+
+  // ---- --chrome-clear: #mode-filter's clearance over #chrome ---------------
+  // #mode-filter is pinned above #chrome with `bottom: calc(var(--chrome-clear)
+  // + 8px)`. #chrome's height is NOT a constant -- it measured 177.4px at
+  // 1280x900 but 253.3px at 375x667, because its rows wrap -- so a hardcoded
+  // offset is exactly the guess that buried the rail under the bar in the first
+  // place (up to 167px of a 177px rail at 1366x768). Publishing the MEASURED
+  // height instead means the rail is positioned by the box it must clear.
+  //
+  // A ResizeObserver rather than a resize listener: #chrome also changes height
+  // without the window changing size (the AOI/city picker rows re-wrap when a
+  // city with more/longer chip labels loads), and those are precisely the cases
+  // a resize handler never sees.
+  if (typeof ResizeObserver === "function") {
+    const publishChromeClear = () => {
+      // offsetHeight, not getBoundingClientRect: #chrome carries no transform,
+      // and the rounded integer avoids rewriting the custom property on
+      // sub-pixel jitter, which would invalidate style on every frame.
+      const h = chromeEl.offsetHeight;
+      // `hidden` collapses #chrome to 0; keeping the last real value would
+      // strand the rail mid-screen, and 0 would let it sit at the very bottom
+      // edge, so fall back to the CSS default by clearing the property.
+      if (h > 0) document.documentElement.style.setProperty("--chrome-clear", `${h}px`);
+      else document.documentElement.style.removeProperty("--chrome-clear");
+    };
+    const chromeRO = new ResizeObserver(publishChromeClear);
+    chromeRO.observe(chromeEl);
+    publishChromeClear();
+    // ResizeObserver is not a DOM listener, so `abort` does not reach it; a
+    // city switch builds a new session and would otherwise leak one observer
+    // per switch, all writing the same property.
+    abort.signal.addEventListener("abort", () => chromeRO.disconnect());
+  }
 
   // flyToBbox — animated camera move (spec §1). NO field clear, NO sePtr
   // resync: playback and camera are orthogonal; the world keeps rippling
@@ -1801,6 +1878,67 @@ async function initApp() {
   modeLifeEl?.addEventListener("click", () => { setMode("life"); }, { signal: abort.signal });
   modeDesertsEl?.addEventListener("click", () => { setMode("deserts"); }, { signal: abort.signal });
 
+  // Every mode starts visible. This is an INVARIANT MARKER, not a live fix: a
+  // city switch tears the whole session down and boot() builds a fresh `state`
+  // whose initializer already sets `modeVisible: newVisibility()`, so this
+  // assignment is a no-op today and cannot be observed. It is kept so the
+  // reset stays adjacent to the row rebuild below -- if `state` ever becomes
+  // durable across switches, a stale filter from the previous city (bus hidden
+  // in Helsinki, then switching to Porto, which has no bus toggle to restore
+  // it with) would be a real bug, and this line is where it is already handled.
+  state.modeVisible = newVisibility();
+
+  // Built per CITY, not once at boot: mode_codes is a fixed 5-slot table in
+  // every city, so it cannot say what a city runs. Measured 2026-08-13 --
+  // porto is metro+bus only, madrid has no train or ferry, paris no ferry.
+  // A fixed five-button row would ship dead toggles in three of five cities.
+  function buildModeFilter() {
+    if (!modeFilterEl) return;
+    const present = presentModes(stopMode);
+    modeFilterEl.replaceChildren();
+    if (present.length < 2) {
+      // One mode (or none) means nothing to filter -- a lone toggle that can
+      // only blank the screen is not a control, it is a trap.
+      modeFilterEl.hidden = true;
+      return;
+    }
+    for (const m of present) {
+      const name = MODE_NAMES[m];
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.dataset.mode = name;
+      btn.setAttribute("aria-pressed", String(isVisible(state.modeVisible, m)));
+      btn.setAttribute("aria-label", `Toggle ${name}`);
+      btn.title = `Show or hide ${name}`;
+      const sw = document.createElement("span");
+      sw.className = "swatch";
+      const [r, g, b] = MODE_COLORS[m];
+      sw.style.setProperty("--swatch",
+        `rgb(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)})`);
+      btn.append(sw, document.createTextNode(name));
+      modeFilterEl.append(btn);
+    }
+    modeFilterEl.hidden = false;
+  }
+  buildModeFilter();
+
+  // Delegated listener, registered once per boot() (cleaned up via
+  // abort.signal on the next city switch, same idiom as the mode-rail
+  // buttons above) rather than once per buildModeFilter() call -- the row is
+  // rebuilt on every city switch, so a listener added inside the builder
+  // would stack a fresh copy per switch.
+  modeFilterEl?.addEventListener("click", (ev) => {
+    const btn = ev.target.closest("button[data-mode]");
+    if (!btn) return;
+    const mode = MODE_NAMES.indexOf(btn.dataset.mode);
+    if (mode < 0) return;
+    const on = !isVisible(state.modeVisible, mode);
+    setVisible(state.modeVisible, mode, on);
+    btn.setAttribute("aria-pressed", String(on));
+    resetModeScratch();
+    field.clearField();
+  }, { signal: abort.signal });
+
   // Sun rail: reflects state.sunEnabled/state.sunSeason, which may already be
   // non-default here — either from ?sun=off / ?season=<key> on the FIRST
   // boot, or (on any later boot) restored from `sunPersist`, which carries
@@ -1998,9 +2136,42 @@ async function initApp() {
       // over stamps accumulated under the previous one.
       setColourMode(mode) {
         if (!COLOUR_MODES.includes(mode)) throw new Error(`unknown colour mode: ${mode}`);
+        // The mode filter is defined ONLY for additive. Under identity a shared
+        // edge is drawn once by the highest-ranked mode, so hiding that mode
+        // would not reveal the others that serve the same edge; under overlap
+        // the "how many modes serve this edge" count stops being true the
+        // moment one is hidden. Throwing beats silently resetting the filter:
+        // this is called by capture tooling, and a silent reset would produce
+        // frames that disagree with the operator's filter, discoverable only by eye.
+        const hidden = hiddenModeNames(state.modeVisible);
+        if (hidden.length) {
+          throw new Error(
+            `cannot switch colour mode while modes are hidden (${hidden.join(", ")}); ` +
+            `reset the mode filter first`);
+        }
         state.colourMode = mode;
         resetModeScratch();
         field.clearField();
+      },
+      // Drives the filter from the live gate and from capture scripts. Takes a
+      // NAME rather than a code so a capture script reads legibly and cannot
+      // silently target the wrong mode if codes ever move.
+      setModeVisible(name, on) {
+        const mode = MODE_NAMES.indexOf(name);
+        if (mode < 0) throw new Error(`unknown mode: ${name}`);
+        setVisible(state.modeVisible, mode, on);
+        // Clear so the next frame is drawn wholly under the new filter rather
+        // than compositing over stamps accumulated under the old one -- the
+        // same reason setColourMode clears.
+        resetModeScratch();
+        field.clearField();
+      },
+      getModeVisible() {
+        const out = {};
+        for (let m = 0; m < MODE_NAMES.length; m++) {
+          out[MODE_NAMES[m]] = isVisible(state.modeVisible, m);
+        }
+        return out;
       },
     };
   }
@@ -2467,6 +2638,7 @@ async function initApp() {
       if (x < bb[0] || x > bb[2] || y < bb[1] || y > bb[3]) continue;
       const mode = MODE_CODE(vehData.routes[trip.shape].mode);
       const slot = (mode >= 0 && mode < MODE_N_V) ? mode : 3;
+      if (!isVisible(state.modeVisible, slot)) continue;
       const [px, py] = state.proj.fn(x, y);
       const c = MODE_COLORS[slot];
       const st = vehicleStyleFor(slot);
@@ -2685,6 +2857,7 @@ async function initApp() {
       return;
     }
     for (let m = 0; m < MODE_N; m++) {
+      if (!isVisible(state.modeVisible, m)) continue;
       const n = modeCount[m];
       if (n === 0) continue;
       // Pass the buffers whole plus an explicit vertex count -- no
@@ -2977,7 +3150,10 @@ async function initApp() {
 
     // Persistent network silhouette first; animated ripples and dots retain
     // visual priority because every later pass additively draws over it.
-    field.drawCorridors(state.proj, corridorColors, corridorWidth, corridorBrightness);
+    // Filtered through the mode toggle (see visibleCorridorColors above) so a
+    // hidden mode's silhouette does not stay lit under a filter that claims
+    // to remove it.
+    field.drawCorridors(state.proj, visibleCorridorColors(), corridorWidth, corridorBrightness);
 
     // Travelling heads sit above the static silhouette but below ripple
     // restamps. Older bundles leave vehData null and retain the old rendering.
@@ -3012,6 +3188,7 @@ async function initApp() {
         bucket.push(leg);
       }
       for (let mode = 0; mode < MODE_COLORS.length; mode++) {
+        if (!isVisible(state.modeVisible, mode)) continue;
         const bucket = pulseByMode[mode];
         if (!bucket || !bucket.length) continue;
         let used = 0;
@@ -3087,6 +3264,7 @@ async function initApp() {
         if (x < bb[0] || x > bb[2] || y < bb[1] || y > bb[3]) continue;
         const [px, py] = state.proj.fn(x, y);
         const mode = MODE_CODE(vehData.routes[trip.shape].mode);
+        if (!isVisible(state.modeVisible, mode)) continue;
         const c = MODE_COLORS[mode];
         pts.push(px, py); cols.push(c[0], c[1], c[2], oneXAlpha);
         pushed++;
@@ -3119,7 +3297,9 @@ async function initApp() {
         if (x < bb[0] || x > bb[2] || y < bb[1] || y > bb[3]) continue;
         const [px, py] = state.proj.fn(x, y);
         const alpha = (1 - age / IMPACT_FADE_SIM_SEC) * 0.6;
-        const c = MODE_COLORS[stopMode[stop]];
+        const mode = stopMode[stop];
+        if (!isVisible(state.modeVisible, mode)) continue;
+        const c = MODE_COLORS[mode];
         pts.push(px, py); cols.push(c[0], c[1], c[2], alpha);
       }
       if (pts.length) field.stampDots(Float32Array.from(pts), Float32Array.from(cols), 7.0);

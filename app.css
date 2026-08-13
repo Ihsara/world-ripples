@@ -200,6 +200,74 @@ body { font: 15px/1.45 system-ui, sans-serif; color: #e8e8ec; background: #10142
 /* Same [hidden] specificity trap #mode-rail/#sun-rail hit. */
 #view-rail[hidden] { display: none !important; }
 
+/* ---------- mode filter: one toggle per transport mode the city runs ----------
+   Left-edge rail sharing the language of #mode-rail/#sun-rail/#view-rail, but
+   anchored to the BOTTOM of the free strip rather than stacked below them.
+   Doubles as the colour legend: each button carries the swatch it toggles.
+
+   WHY NOT a fourth vertical entry (the original `top:50%; margin-top:200px`):
+   there is no strip left to stack into. Measured on Helsinki (5 toggles, the
+   worst case), chrome SHOWN, the gap between #sun-rail's bottom and #chrome's
+   top is 119px at 1280x900, 53px at 1366x768, and NEGATIVE 73px at 375x667 --
+   against a 177px-tall column. The existing stack already overflows on its own
+   (#mode-rail.bottom 543.8 vs #sun-rail.top 534 overlap at every viewport, and
+   at 375x667 #sun-rail runs under #chrome before this feature exists). So no
+   retuned margin-top can fit, and `max-height + overflow-y` would only trade an
+   invisible legend for a scrollbar on a five-item legend -- the same bug wearing
+   a scrollbar.
+
+   Instead the rail leaves the vertical stack: it becomes a horizontal ROW (the
+   idiom #view-rail already uses) pinned just above #chrome with `bottom`, so it
+   is positioned by the thing it was colliding with instead of by a guess from
+   the viewport's centre. Height drops 177px -> 43.4px (37.9px under 640px),
+   which fits the strip at every viewport by construction rather than by
+   tuning. `bottom` is derived from #chrome's own measured height, and the rail
+   wraps if a city ever runs more modes than fit one line.
+
+   Measured after the change, Helsinki, chrome SHOWN: the rail clears #chrome by
+   7.6px at 1280x900 / 1366x768 / 1440x900 and by 7.7px at 375x667, with all
+   five toggles hit-testing clickable at every one. */
+#mode-filter {
+  position: fixed; left: 0; z-index: 6;
+  /* Clearance over #chrome. --chrome-clear is MEASURED, not guessed: app.js
+     observes #chrome's real box and writes the value, so a chrome bar that
+     grows (a wrapped row, a new control, a longer clock) pushes the rail up
+     instead of being overlapped by it. The fallback below is the measured
+     desktop height and only applies for the frame before the observer fires;
+     the @media rules keep even that frame clear on the narrow viewports where
+     #chrome's rows wrap (measured Helsinki: 177.4px >=641w, 215.9px at 430w,
+     253.3px at 375w). */
+  bottom: calc(var(--chrome-clear, 178px) + 8px);
+  display: flex; flex-direction: row; flex-wrap: wrap; gap: 4px; padding: 6px;
+  max-width: calc(100vw - 12px);
+  background: rgba(14,18,30,.9); border: 1px solid #2a313d; border-left: none;
+  border-radius: 0 10px 10px 0;
+}
+/* `min-width: 84px` is deliberately GONE (it was there for the vertical column,
+   where it aligned the swatches into a tidy left edge). In a horizontal row it
+   is actively harmful: five buttons at 84px plus gaps and padding demand 448px,
+   so on a 375px viewport the row would wrap to a second line and eat back the
+   very strip this layout just freed. Each button now sizes to its own label. */
+#mode-filter button {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 10px; border: 1px solid #2a313d;
+  background: rgba(16,20,32,.82); color: #c7ccd6; border-radius: 8px;
+  cursor: pointer; font: inherit; font-size: 12px; text-align: left;
+  white-space: nowrap; transition: all .15s;
+}
+#mode-filter button:hover { border-color: #46505f; color: #e8e8ec; }
+#mode-filter button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+/* The swatch is what makes this control a legend as well as a filter. */
+#mode-filter .swatch {
+  width: 10px; height: 10px; border-radius: 2px;
+  background: var(--swatch); flex: none;
+}
+/* A hidden mode reads as "off" but keeps its colour identity. */
+#mode-filter button[aria-pressed="false"] { opacity: .38; }
+/* Same [hidden] specificity trap #mode-rail/#sun-rail/#view-rail hit: the ID
+   rule above beats the UA stylesheet's display:none. */
+#mode-filter[hidden] { display: none !important; }
+
 /* Idle-hide: in fullscreen the chrome gets out of the way and returns on move. */
 body.chrome-hidden #chrome,
 body.chrome-hidden #fullscreen-btn,
@@ -208,7 +276,8 @@ body.chrome-hidden #credits-btn,
 body.chrome-hidden #district-panel,
 body.chrome-hidden #mode-rail,
 body.chrome-hidden #sun-rail,
-body.chrome-hidden #view-rail { opacity: 0; pointer-events: none;
+body.chrome-hidden #view-rail,
+body.chrome-hidden #mode-filter { opacity: 0; pointer-events: none;
   transition: opacity .4s; }
 
 /* ---------- intro overlay + click-stepper ----------
@@ -384,6 +453,15 @@ body.chrome-hidden #view-rail { opacity: 0; pointer-events: none;
   #intro-card, #stepper-card { padding: 20px 20px; }
   #intro-title { font-size: 19px; }
   #stepper { padding-bottom: 140px; }
+
+  /* Pre-observer fallback only (see #mode-filter): under 640px #chrome's rows
+     wrap and it measures 253.3px tall on Helsinki, so the desktop 178px default
+     would put the rail under the bar for the first frame. Shrink the buttons
+     too -- five toggles must fit the 375px-wide row without wrapping to a
+     second line that would eat the same strip back. */
+  #mode-filter { bottom: calc(var(--chrome-clear, 254px) + 8px); gap: 3px; padding: 5px; }
+  #mode-filter button { padding: 4px 7px; font-size: 11px; gap: 4px; }
+  #mode-filter .swatch { width: 8px; height: 8px; }
 }
 
 /* ---------- NARROW PHONES ----------
