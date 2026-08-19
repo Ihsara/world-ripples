@@ -26,10 +26,16 @@ body { font: 15px/1.45 system-ui, sans-serif; color: #e8e8ec; background: #10142
 #transport { display: inline-flex; gap: 6px; align-items: center; }
 #play-pause { min-width: 40px; text-align: center; }
 #clock { font-variant-numeric: tabular-nums; font-size: 15px; color: #fff; }
+#clock-daypart { min-height: 1.15em; color: #dff9ff; font-size: 12px; font-weight: 650; letter-spacing: .04em; }
 /* 1x whisper: a quiet "next ripple · 12s" line under the clock (spec §4) */
 #whisper { font-size: 12px; color: #7d8494; min-height: 1.2em; font-variant-numeric: tabular-nums; }
 
-#scrubber { width: 100%; accent-color: #6fd3e6; }
+#timeline { position: relative; width: 100%; padding-top: 22px; }
+#scrubber { width: 100%; margin: 0; accent-color: #6fd3e6; }
+#daypart-markers { position: absolute; inset: 0 8px auto; height: 24px; }
+.daypart-marker { position: absolute; left: calc(var(--pos) * 100%); transform: translateX(-50%); width: 22px; height: 22px; padding: 0; border: 1px solid rgba(111,211,230,.72); border-radius: 50%; background: rgba(16,20,32,.92); color: #dff9ff; box-shadow: 0 1px 5px rgba(0,0,0,.55); font: 12px/1 system-ui; cursor: pointer; }
+.daypart-marker:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.daypart-marker:disabled { opacity: .32; border-color: #7d8494; color: #a4aab5; cursor: not-allowed; }
 
 /* ---------- export row ----------
    Lives inside #chrome (so hideChrome takes it out of its own capture) and
@@ -114,159 +120,81 @@ body { font: 15px/1.45 system-ui, sans-serif; color: #e8e8ec; background: #10142
 #speed-readout { min-width: 3.2em; text-align: center; color: #fff;
   font-variant-numeric: tabular-nums; font-size: 13px; }
 
-/* ---------- mode rail: Ripples | Life | History ----------
-   A LEFT-edge rail mirroring #district-panel on the right. Same dark
-   translucent fill and #2a313d border as that panel so the two read as a
-   matched pair of edge controls, with the radius mirrored (rounded on the
-   inner/right side, flush against the left screen edge).
-
-   The cyan .active fill is carried over verbatim from the old bottom-bar
-   toggle — the selection language does not change, only its location. */
-#mode-rail {
-  position: fixed; left: 0; top: 50%; transform: translateY(-50%); z-index: 6;
-  display: flex; flex-direction: column; gap: 6px; padding: 10px;
-  background: rgba(14,18,30,.9); border: 1px solid #2a313d; border-left: none;
-  border-radius: 0 10px 10px 0;
+/* ---------- unified left control rail ---------- */
+:root { --ground-l: .161; }
+#control-rail {
+  /* The rail follows the ground so it never reads as debris stuck to a bright
+     map. Both tracks are DELIBERATELY steep and OPPOSED: the surface rises
+     with the ground while the text falls, so the pair crosses over and the
+     rail flips from "light on dark" to "dark on light" as the sun comes up.
+     The first attempt ramped the surface only .12 -> .275 while the text got
+     LIGHTER, which left a near-black slab on a #c0d3e8 noon map -- visibly
+     the same bug the redesign was meant to fix.
+     Surface stays just off the ground's own lightness (a hair darker at night,
+     a hair lighter than mid by day) so the rail always separates from the map;
+     text is pinned to the opposite end, keeping >= 4.5:1 at every --ground-l. */
+  /* The rail follows the ground so it never reads as debris stuck to a bright
+     map -- but it FLIPS between two regimes rather than ramping through the
+     middle. Two failed attempts, both measured with
+     tools/check_rail_contrast.mjs, are why:
+       1. Surface ramping .12 -> .275 while text got LIGHTER left a near-black
+          slab on the #c0d3e8 noon map -- the very bug this redesign targets.
+       2. Opposed LINEAR ramps (surface up, text down) CROSS: at --ground-l .52
+          the text was exactly the surface, 1.00:1, invisible mid-morning.
+          (Same crossing failure as the mode palette's sunrise collapse --
+          see sun-palette-spec.md. A ramp through mid-lightness cannot work:
+          nothing contrasts against mid grey, so the best flat-ramp solution
+          tops out at 4.38:1.)
+     So BOTH surface and text switch at one threshold, and each ramps only
+     WITHIN its own regime -- the surface is never mid-lightness. Dark regime:
+     light text on a dark panel, as today. Light regime: dark text on a pale
+     panel. Worst case across the whole range is 16.7:1. */
+  --rail-flip: clamp(0, calc((var(--ground-l) - .40) * 1000), 1);
+  --rail-surface: oklab(
+    calc((1 - var(--rail-flip)) * (.10 + var(--ground-l) * .10)
+       + var(--rail-flip) * (.93 + (var(--ground-l) - .40) * .03))
+    .004 -.012 / .93);
+  --rail-text: oklab(calc(.97 - var(--rail-flip) * .87) 0 0);
+  position: fixed; left: 0; bottom: calc(var(--chrome-clear, 178px) + 8px);
+  z-index: 6; width: min(172px, calc(100vw - 12px)); padding: 10px;
+  display: flex; flex-direction: column; gap: 12px; overflow-y: auto;
+  max-height: calc(100vh - var(--chrome-clear, 178px) - 16px);
+  background: var(--rail-surface); color: var(--rail-text);
+  border: 1px solid color-mix(in oklab, var(--rail-text) 22%, transparent);
+  border-left: none; border-radius: 0 10px 10px 0;
 }
-#mode-rail button {
-  display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
-  min-width: 84px; padding: 7px 12px; border: 1px solid #2a313d;
-  background: rgba(16,20,32,.82); color: #c7ccd6; border-radius: 8px;
-  cursor: pointer; font: inherit; font-size: 12px; text-align: left;
-  transition: all .15s;
+#control-rail[hidden] { display: none !important; }
+#mode-rail, #sun-rail, #view-rail, #mode-filter {
+  position: static; width: 100%; min-width: 0; padding: 0; margin: 0;
+  display: flex; flex-direction: column; gap: 5px;
+  background: none; border: 0; border-radius: 0; transform: none;
 }
-#mode-rail button:hover:not([disabled]) { border-color: #46505f; color: #e8e8ec; }
-#mode-rail button.active {
-  background: #6fd3e6; color: #061014; border-color: #6fd3e6; font-weight: 600;
+#mode-rail[hidden], #sun-rail[hidden], #view-rail[hidden], #mode-filter[hidden] { display: none !important; }
+.rail-label {
+  font: 11px/1 monospace; letter-spacing: .1em; text-transform: uppercase;
+  color: color-mix(in oklab, var(--rail-text) 72%, transparent); margin-bottom: 1px;
 }
-#mode-rail button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
-/* Disabled = History until the APC pipeline exists. `cursor: default` and the
-   dropped opacity are the affordance; `pointer-events` is deliberately NOT
-   disabled so the title tooltip explaining WHY still appears on hover. */
-#mode-rail button[disabled] {
-  opacity: .38; cursor: default; background: rgba(16,20,32,.5);
+.rail-btn {
+  position: relative; width: 100%; height: 32px; min-width: 0; padding: 0 9px;
+  display: flex; align-items: center; gap: 6px; overflow: hidden;
+  border: 1px solid color-mix(in oklab, var(--rail-text) 22%, transparent);
+  border-radius: 7px; background: color-mix(in oklab, var(--rail-text) 6%, transparent);
+  color: inherit; cursor: pointer; font: 12px/1 system-ui, sans-serif;
+  text-align: left; white-space: nowrap; transition: background .15s, border-color .15s;
 }
-.mr-sub {
-  font-size: 9px; letter-spacing: .08em; text-transform: uppercase;
-  color: #7d8494; font-weight: 400;
+.rail-btn:hover:not([disabled]) { border-color: color-mix(in oklab, var(--rail-text) 48%, transparent); }
+.rail-btn.active, .rail-btn[aria-pressed="true"] { background: color-mix(in oklab, #6fd3e6 13%, transparent); font-weight: 600; }
+.rail-btn.active::before, .rail-btn[aria-pressed="true"]::before {
+  content: ""; position: absolute; inset: 4px auto 4px 0; width: 2px;
+  border-radius: 0 2px 2px 0; background: #6fd3e6;
 }
-/* Same [hidden] specificity trap the overlays hit: the ID rule above would
-   otherwise beat the UA stylesheet's display:none. */
-#mode-rail[hidden] { display: none !important; }
-/* Generation readout replaces the clock's slot while Life is active; it is
-   plain text in #clock, so it inherits the tabular-nums treatment already
-   there and needs no extra rule. */
-#clock, #whisper { text-align: center; }
-
-/* ---------- sun rail: Sun toggle + Mar/Jun/Sep/Dec ----------
-   Same left-edge treatment as #mode-rail, offset below it so the two rails
-   stack rather than overlap. Unlike #mode-rail (Helsinki/Life-only), sunlight
-   applies to every city, so this rail is unhidden unconditionally in boot(). */
-#sun-rail {
-  position: fixed; left: 0; top: 50%; margin-top: 84px; z-index: 6;
-  display: flex; flex-direction: column; gap: 4px; padding: 6px;
-  background: rgba(14,18,30,.9); border: 1px solid #2a313d; border-left: none;
-  border-radius: 0 10px 10px 0;
-}
-#sun-rail button {
-  border: 1px solid #2a313d; background: rgba(16,20,32,.82); color: #c7ccd6;
-  border-radius: 7px; padding: 4px 10px; font: inherit; font-size: 12px; cursor: pointer;
-}
-#sun-rail button.active { background: #6fd3e6; color: #061014; border-color: #6fd3e6; font-weight: 600; }
-#sun-seasons { display: flex; gap: 3px; }
-#sun-seasons button { padding: 3px 6px; font-size: 11px; }
+.rail-btn:focus-visible { outline: 2px solid var(--rail-text); outline-offset: 2px; }
+#sun-seasons { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; }
 #sun-rail[data-sun="off"] #sun-seasons { opacity: .38; pointer-events: none; }
-/* Same [hidden] specificity trap #mode-rail hits: the ID rule above would
-   otherwise beat the UA stylesheet's display:none. */
-#sun-rail[hidden] { display: none !important; }
-
-/* ---------- view rail: spatial zoom presets (core / petite / grande, ...) ----------
-   Same left-edge treatment, stacked below #sun-rail. Button/active language is
-   copied verbatim from #sun-rail buttons -- a view is a camera choice, same
-   register as a season choice, not a new control language. */
-#view-rail {
-  position: fixed; left: 0; top: 50%; margin-top: 124px; z-index: 6;
-  display: flex; flex-direction: row; gap: 3px; padding: 6px;
-  background: rgba(14,18,30,.9); border: 1px solid #2a313d; border-left: none;
-  border-radius: 0 10px 10px 0;
-}
-#view-rail button {
-  border: 1px solid #2a313d; background: rgba(16,20,32,.82); color: #c7ccd6;
-  border-radius: 7px; padding: 4px 10px; font: inherit; font-size: 12px; cursor: pointer;
-}
-#view-rail button:hover:not(.active) { border-color: #46505f; color: #e8e8ec; }
-#view-rail button.active { background: #6fd3e6; color: #061014; border-color: #6fd3e6; font-weight: 600; }
-#view-rail button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
-/* Same [hidden] specificity trap #mode-rail/#sun-rail hit. */
-#view-rail[hidden] { display: none !important; }
-
-/* ---------- mode filter: one toggle per transport mode the city runs ----------
-   Left-edge rail sharing the language of #mode-rail/#sun-rail/#view-rail, but
-   anchored to the BOTTOM of the free strip rather than stacked below them.
-   Doubles as the colour legend: each button carries the swatch it toggles.
-
-   WHY NOT a fourth vertical entry (the original `top:50%; margin-top:200px`):
-   there is no strip left to stack into. Measured on Helsinki (5 toggles, the
-   worst case), chrome SHOWN, the gap between #sun-rail's bottom and #chrome's
-   top is 119px at 1280x900, 53px at 1366x768, and NEGATIVE 73px at 375x667 --
-   against a 177px-tall column. The existing stack already overflows on its own
-   (#mode-rail.bottom 543.8 vs #sun-rail.top 534 overlap at every viewport, and
-   at 375x667 #sun-rail runs under #chrome before this feature exists). So no
-   retuned margin-top can fit, and `max-height + overflow-y` would only trade an
-   invisible legend for a scrollbar on a five-item legend -- the same bug wearing
-   a scrollbar.
-
-   Instead the rail leaves the vertical stack: it becomes a horizontal ROW (the
-   idiom #view-rail already uses) pinned just above #chrome with `bottom`, so it
-   is positioned by the thing it was colliding with instead of by a guess from
-   the viewport's centre. Height drops 177px -> 43.4px (37.9px under 640px),
-   which fits the strip at every viewport by construction rather than by
-   tuning. `bottom` is derived from #chrome's own measured height, and the rail
-   wraps if a city ever runs more modes than fit one line.
-
-   Measured after the change, Helsinki, chrome SHOWN: the rail clears #chrome by
-   7.6px at 1280x900 / 1366x768 / 1440x900 and by 7.7px at 375x667, with all
-   five toggles hit-testing clickable at every one. */
-#mode-filter {
-  position: fixed; left: 0; z-index: 6;
-  /* Clearance over #chrome. --chrome-clear is MEASURED, not guessed: app.js
-     observes #chrome's real box and writes the value, so a chrome bar that
-     grows (a wrapped row, a new control, a longer clock) pushes the rail up
-     instead of being overlapped by it. The fallback below is the measured
-     desktop height and only applies for the frame before the observer fires;
-     the @media rules keep even that frame clear on the narrow viewports where
-     #chrome's rows wrap (measured Helsinki: 177.4px >=641w, 215.9px at 430w,
-     253.3px at 375w). */
-  bottom: calc(var(--chrome-clear, 178px) + 8px);
-  display: flex; flex-direction: row; flex-wrap: wrap; gap: 4px; padding: 6px;
-  max-width: calc(100vw - 12px);
-  background: rgba(14,18,30,.9); border: 1px solid #2a313d; border-left: none;
-  border-radius: 0 10px 10px 0;
-}
-/* `min-width: 84px` is deliberately GONE (it was there for the vertical column,
-   where it aligned the swatches into a tidy left edge). In a horizontal row it
-   is actively harmful: five buttons at 84px plus gaps and padding demand 448px,
-   so on a 375px viewport the row would wrap to a second line and eat back the
-   very strip this layout just freed. Each button now sizes to its own label. */
-#mode-filter button {
-  display: flex; align-items: center; gap: 6px;
-  padding: 5px 10px; border: 1px solid #2a313d;
-  background: rgba(16,20,32,.82); color: #c7ccd6; border-radius: 8px;
-  cursor: pointer; font: inherit; font-size: 12px; text-align: left;
-  white-space: nowrap; transition: all .15s;
-}
-#mode-filter button:hover { border-color: #46505f; color: #e8e8ec; }
-#mode-filter button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
-/* The swatch is what makes this control a legend as well as a filter. */
-#mode-filter .swatch {
-  width: 10px; height: 10px; border-radius: 2px;
-  background: var(--swatch); flex: none;
-}
-/* A hidden mode reads as "off" but keeps its colour identity. */
-#mode-filter button[aria-pressed="false"] { opacity: .38; }
-/* Same [hidden] specificity trap #mode-rail/#sun-rail/#view-rail hit: the ID
-   rule above beats the UA stylesheet's display:none. */
-#mode-filter[hidden] { display: none !important; }
+#view-rail:empty { display: none !important; }
+#mode-filter .swatch { width: 10px; height: 10px; border-radius: 2px; background: var(--swatch); flex: none; }
+#mode-filter .rail-btn[aria-pressed="false"] { opacity: .38; }
+#clock, #clock-daypart, #whisper { text-align: center; }
 
 /* Idle-hide: in fullscreen the chrome gets out of the way and returns on move. */
 body.chrome-hidden #chrome,
@@ -274,12 +202,7 @@ body.chrome-hidden #fullscreen-btn,
 body.chrome-hidden #help-btn,
 body.chrome-hidden #credits-btn,
 body.chrome-hidden #district-panel,
-body.chrome-hidden #mode-rail,
-body.chrome-hidden #sun-rail,
-body.chrome-hidden #view-rail,
-body.chrome-hidden #mode-filter { opacity: 0; pointer-events: none;
-  transition: opacity .4s; }
-
+body.chrome-hidden #control-rail { opacity: 0; pointer-events: none; transition: opacity .4s; }
 /* ---------- intro overlay + click-stepper ----------
    Bremer/Visual Cinnamon pattern: quiet, semi-transparent dark panels,
    generous whitespace, one idea per screen, click-to-advance only. */
@@ -454,14 +377,7 @@ body.chrome-hidden #mode-filter { opacity: 0; pointer-events: none;
   #intro-title { font-size: 19px; }
   #stepper { padding-bottom: 140px; }
 
-  /* Pre-observer fallback only (see #mode-filter): under 640px #chrome's rows
-     wrap and it measures 253.3px tall on Helsinki, so the desktop 178px default
-     would put the rail under the bar for the first frame. Shrink the buttons
-     too -- five toggles must fit the 375px-wide row without wrapping to a
-     second line that would eat the same strip back. */
-  #mode-filter { bottom: calc(var(--chrome-clear, 254px) + 8px); gap: 3px; padding: 5px; }
-  #mode-filter button { padding: 4px 7px; font-size: 11px; gap: 4px; }
-  #mode-filter .swatch { width: 8px; height: 8px; }
+  #control-rail { bottom: calc(var(--chrome-clear, 254px) + 8px); max-height: calc(100vh - var(--chrome-clear, 254px) - 16px); }
 }
 
 /* ---------- NARROW PHONES ----------
@@ -501,13 +417,7 @@ body.chrome-hidden #mode-filter { opacity: 0; pointer-events: none;
      gone. #utility keeps order 6 — the values need not be contiguous, and
      renumbering it would be churn for no layout change. */
 
-  /* Narrow screens: shrink the rail rather than move it. The district panel
-     becomes a BOTTOM sheet under 640px and #chrome owns the bottom strip, so
-     the left edge stays free — but the rail must clear both. Vertically
-     centred at 50% it sits above the chrome bar even at 360px wide. */
-  #mode-rail { padding: 6px; gap: 4px; }
-  #mode-rail button { min-width: 0; padding: 6px 9px; font-size: 11px; }
-  .mr-sub { font-size: 8px; }
+  #control-rail { width: min(156px, calc(100vw - 12px)); padding: 8px; gap: 9px; }
 
   /* The panel tab's 148px bottom margin was cleared for the OLD chrome height;
      the utility row adds ~40px, so lift it to keep the tab clear of the bar. */

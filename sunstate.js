@@ -2,8 +2,8 @@
 // renderer. The field draws continuously; solar position changes far too
 // slowly to justify per-frame trigonometry, so it is recomputed at most once
 // per SIMULATED minute and the resulting colour is cached.
-import { solarElevation, SEASONS } from "./solar.js?v=963df69525";
-import { groundColorFor, DEFAULT_RGB } from "./sunlight.js?v=963df69525";
+import { solarElevation, SEASONS } from "./solar.js?v=a6334c0401";
+import { groundColorFor, DEFAULT_RGB } from "./sunlight.js?v=a6334c0401";
 
 export function makeSunState({ lat, lon, utcOffsetHours, seasonKey }) {
   const season = SEASONS.find((s) => s.key === seasonKey) || SEASONS[0];
@@ -12,6 +12,10 @@ export function makeSunState({ lat, lon, utcOffsetHours, seasonKey }) {
   return {
     recomputes: 0,
     seasonKey: season.key,
+    elevationFor(civilSecondsSinceMidnight) {
+      return solarElevation({ lat, lon, utcOffsetHours, dayOfYear: season.dayOfYear,
+        civilSecondsSinceMidnight: Math.floor(civilSecondsSinceMidnight / 60) * 60 });
+    },
     baseFor(civilSecondsSinceMidnight, enabled) {
       // A copy, not the module-level DEFAULT_RGB by reference: field.js
       // aliases the same export as its own fallback, so handing back the
@@ -23,11 +27,7 @@ export function makeSunState({ lat, lon, utcOffsetHours, seasonKey }) {
       if (minute !== lastMinute) {
         lastMinute = minute;
         this.recomputes++;
-        const elev = solarElevation({
-          lat, lon, utcOffsetHours,
-          dayOfYear: season.dayOfYear,
-          civilSecondsSinceMidnight: minute * 60,
-        });
+        const elev = this.elevationFor(civilSecondsSinceMidnight);
         cached = groundColorFor(elev);
       }
       return cached;

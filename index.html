@@ -1,11 +1,12 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Cities, breathing in light</title><link rel="stylesheet" href="app.css?v=963df69525"></head>
+<title>Cities, breathing in light</title><link rel="stylesheet" href="app.css?v=a6334c0401"></head>
 <body>
 <canvas id="map"></canvas>
 <canvas id="overlay"></canvas>
 <div id="district-panel" hidden></div>
 
+<div id="control-rail" aria-label="Map controls" hidden>
 <!-- Mode rail. Deliberately the LEFT edge, mirroring #district-panel on the
      right, because the two answer different questions: the left rail is WHAT
      you are looking at (which simulation), the right panel is WHERE (which
@@ -15,25 +16,16 @@
      Ripples is the DEFAULT a first-time visitor lands on. Life is opt-in and,
      for now, only baked for Helsinki — app.js hides the whole rail for any
      other city rather than offering a button that can only fail.
-
-     History is PRESENT BUT DISABLED: it is APC-driven (real passenger counts)
-     and not built yet. It ships disabled rather than hidden so the third mode
-     is discoverable, and because a mode that will likely stay Helsinki-only
-     needs a visible unavailable-state anyway — better to design it now than to
-     bolt it on later. -->
+ -->
 <div id="mode-rail" role="group" aria-label="Visualization mode" hidden>
-  <button id="mode-ripples" type="button" class="active" aria-pressed="true">
+  <div class="rail-label">Mode</div>
+  <button id="mode-ripples" type="button" class="rail-btn active" aria-pressed="true">
     <span class="mr-label">Ripples</span>
   </button>
-  <button id="mode-life" type="button" aria-pressed="false">
+  <button id="mode-life" type="button" class="rail-btn" aria-pressed="false">
     <span class="mr-label">Life</span>
   </button>
-  <button id="mode-history" type="button" aria-pressed="false" disabled aria-disabled="true"
-          title="Not yet available — this mode will replay real passenger counts">
-    <span class="mr-label">History</span>
-    <span class="mr-sub">soon</span>
-  </button>
-  <button id="mode-deserts" type="button" aria-pressed="false">
+  <button id="mode-deserts" type="button" class="rail-btn" aria-pressed="false">
     <span class="mr-label">Deserts</span>
   </button>
 </div>
@@ -41,13 +33,14 @@
 <!-- Lighting is not a mode: it applies in BOTH Ripples and Life, so it is a
      separate group rather than a fourth mode-rail button. -->
 <div id="sun-rail" role="group" aria-label="Sunlight" hidden>
-  <button id="sun-toggle" type="button" class="active" aria-pressed="true"
+  <div class="rail-label">Sun</div>
+  <button id="sun-toggle" type="button" class="rail-btn active" aria-pressed="true"
           title="Sunlight for this city's latitude">☀ Sun</button>
   <div id="sun-seasons" role="group" aria-label="Season">
-    <button type="button" data-season="mar" class="active" aria-pressed="true">Mar</button>
-    <button type="button" data-season="jun" aria-pressed="false">Jun</button>
-    <button type="button" data-season="sep" aria-pressed="false">Sep</button>
-    <button type="button" data-season="dec" aria-pressed="false">Dec</button>
+    <button type="button" class="rail-btn active" data-season="mar" aria-pressed="true">Mar</button>
+    <button type="button" class="rail-btn" data-season="jun" aria-pressed="false">Jun</button>
+    <button type="button" class="rail-btn" data-season="sep" aria-pressed="false">Sep</button>
+    <button type="button" class="rail-btn" data-season="dec" aria-pressed="false">Dec</button>
   </div>
 </div>
 
@@ -64,6 +57,7 @@
      view. Buttons are built at runtime from the modes the active city
      actually runs, so this ships empty. -->
 <div id="mode-filter" role="group" aria-label="Transport modes" hidden></div>
+</div>
 
 <div id="intro" role="dialog" aria-modal="true" aria-labelledby="intro-title">
   <div id="intro-card">
@@ -88,9 +82,13 @@
 </div>
 
 <div id="chrome" hidden>
+  <div id="clock-daypart" aria-live="polite"></div>
   <div id="clock">–</div>
   <div id="whisper"></div>
-  <input id="scrubber" type="range" min="0" max="1" step="0.0001" value="0">
+  <div id="timeline">
+    <input id="scrubber" type="range" min="0" max="1" step="0.0001" value="0">
+    <div id="daypart-markers" aria-label="Day parts"></div>
+  </div>
   <div id="transport">
     <button id="skip-back" type="button" title="Back 15 min" aria-label="Back 15 minutes">−15m</button>
     <button id="speed-down" type="button" title="Slower" aria-label="Slower">◀◀</button>
@@ -240,5 +238,5 @@
      part of the interface. -->
 <div id="status" hidden></div>
 <div id="loading" hidden>Loading…</div>
-<script type="module" src="app.js?v=963df69525"></script>
+<script type="module" src="app.js?v=a6334c0401"></script>
 </body></html>

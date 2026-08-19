@@ -1,5 +1,5 @@
 // field.js — pure playback helpers (Task 6) + WebGL field (Task 7).
-import { DEFAULT_RGB } from "./sunlight.js?v=963df69525";
+import { DEFAULT_RGB } from "./sunlight.js?v=a6334c0401";
 export function makeProjection(bbox, w, h, margin) {
   const m = margin || 10;
   const latMid = (bbox.minY + bbox.maxY) / 2;
@@ -120,9 +120,16 @@ const GLOW_STRENGTH = 2.2;
 // as a bright thing moving ALONG a corridor rather than as a second, fatter
 // corridor drawn over the first.
 const PULSE_WIDTH_PX = 2.2;
+// INK_GAIN — how hard an accumulated mark bites into a daylight ground. Tuned
+// in the live gate at noon, Helsinki: 1.0 (plain normalisation) left the plate
+// a pale cyan haze; 3.0 reads as ink without crushing hub detail.
+const INK_GAIN = 3.0;
 const PRESENT_FS = `#version 300 es
 precision highp float; in vec2 uv; uniform sampler2D tex; uniform float glowStrength;
-uniform vec3 uBase;
+uniform vec3 uBase; uniform float compositeMix;
+const float INK_GAIN = ${INK_GAIN.toFixed(1)};
+// Normalise a colour by its brightest channel: keeps hue, discards magnitude.
+vec3 normalize_hue(vec3 c){ float m = max(c.r, max(c.g, c.b)); return m > 0.0001 ? c / m : vec3(0.0); }
 out vec4 o;
 void main(){
   vec4 s = texture(tex, uv);
@@ -145,7 +152,37 @@ void main(){
   // -- not a replacement for either existing mechanism.
   vec3 compressed = log(1.0 + s.rgb);
   vec3 glow = 1.0 - exp(-compressed * glowStrength);
-  o = vec4(base + glow, 1.0);
+  vec3 additive = base + glow;
+
+  // DAYLIGHT (compositeMix -> 1): the marks must behave like INK on a bright
+  // ground, not like light. Every mark is stamped ADDITIVELY into the
+  // accumulation buffer (stampDots/stamp use blendFunc(ONE,ONE)), so 'glow'
+  // is per-channel LIGHT. Darkening the ground by 'base * (1.0 - glow)' --
+  // the obvious-looking form -- removes each channel in proportion to its OWN
+  // light, which INVERTS the hue: a blue mark accumulates mostly blue, so
+  // (1-glow) strips blue and leaves RED. That shipped a map of red dots and a
+  // green metro line while the legend showed blue and orange (caught in the
+  // live gate, noon frame, Helsinki).
+  //
+  // Correct subtractive compositing removes the mark's COMPLEMENT instead.
+  // 'ink' is the mark's own colour normalised by its brightest channel, so
+  // hue survives; 'density' is how much of it landed on this pixel. A pure
+  // blue mark then subtracts red+green from the ground and STAYS blue.
+  // INK_GAIN: normalising by the brightest channel preserves hue but throws
+  // away magnitude, so a faint mark subtracts almost nothing and the plate
+  // reads as pale cyan haze (measured in the live gate: correct hues, far too
+  // washed out). The gain makes density saturate sooner so ordinary marks
+  // actually bite into the ground; it is capped at 1.0 so a hub cannot go
+  // past full ink and invert again.
+  float density = min(1.0, max(glow.r, max(glow.g, glow.b)) * INK_GAIN);
+  vec3 ink = density > 0.0001 ? normalize_hue(glow) : vec3(0.0);
+  // Two effects, both needed: remove the complement (keeps the hue) AND
+  // darken toward the ink itself (gives dense marks their weight). Without
+  // the second term the densest hub is no darker than a single stop.
+  vec3 tint = base * (1.0 - density * (1.0 - ink));
+  vec3 subtractive = mix(tint, tint * ink, density * 0.55);
+
+  o = vec4(mix(additive, subtractive, compositeMix), 1.0);
 }`;
 // stamp: draw colored line segments, additive; intensity in a per-vertex attr.
 // STAMP_BRIGHTNESS boosts the per-stamp intensity so thin (~1px) WebGL lines
@@ -273,6 +310,7 @@ export class RippleField {
       tex:          gl.getUniformLocation(this.presentP, "tex"),
       glowStrength: gl.getUniformLocation(this.presentP, "glowStrength"),
       uBase:        gl.getUniformLocation(this.presentP, "uBase"),
+      compositeMix: gl.getUniformLocation(this.presentP, "compositeMix"),
     };
     this.pointLoc = {
       res:  gl.getUniformLocation(this.pointP, "res"),
@@ -533,7 +571,7 @@ export class RippleField {
     this.tex = null; this.fbo = null;
     this.gl = null;
   }
-  present(baseRgb) {
+  present(baseRgb, compositeMix = 0) {
     const gl = this.gl, loc = this.presentLoc;
     gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, this.w, this.h);
     gl.disable(gl.BLEND);
@@ -543,6 +581,7 @@ export class RippleField {
     gl.uniform1f(loc.glowStrength, GLOW_STRENGTH);
     // Omitted base == today's exact literal, so sun-off renders byte-identically.
     gl.uniform3fv(loc.uBase, baseRgb || DEFAULT_RGB);
+    gl.uniform1f(loc.compositeMix, compositeMix);
     this._drawQuad(this.presentP, this.quadLoc.present);
   }
 }

@@ -13,34 +13,36 @@
 // vehicle dots are interpolated in JS at playback (Option A) and impact dots
 // flash at a stop the instant its event fires.
 
-import { loadAll, makeCityCache } from "./data.js?v=963df69525";
-import { loadLife } from "./life.js?v=963df69525";
-import { cellAlpha, precomputeDeaths, precomputeLastMode } from "./lifeview.js?v=963df69525";
+import { loadAll, makeCityCache } from "./data.js?v=a6334c0401";
+import { activeDayPart, gateDayParts, markerPosition } from "./dayparts.js?v=a6334c0401";
+import { loadLife } from "./life.js?v=a6334c0401";
+import { cellAlpha, precomputeDeaths, precomputeLastMode } from "./lifeview.js?v=a6334c0401";
 import { makeProjection, eventsInWindow, RippleField, realAge, clampSkip,
          rippleLifeHorizon, nextEventInView, whisperText,
-         normalizeStampIntensity } from "./field.js?v=963df69525";
-import { vehiclePosition } from "./vehicles.js?v=963df69525";
+         normalizeStampIntensity } from "./field.js?v=a6334c0401";
+import { vehiclePosition } from "./vehicles.js?v=a6334c0401";
 import { activeLegs, pulseGeometry, pulseHeadPoint, PULSE_BUDGET,
-         PULSE_TAIL } from "./edgepulse.js?v=963df69525";
+         PULSE_TAIL } from "./edgepulse.js?v=a6334c0401";
 import { deriveCorridorWeights, buildCorridorGeometry, corridorWidth,
          corridorBrightness, edgeModeCounts, overlapColour, MODE_RANK,
-         COLOUR_MODES } from "./corridors.js?v=963df69525";
-import { lifeSimSec, vehicleStyleFor } from "./lifevehicles.js?v=963df69525";
+         COLOUR_MODES } from "./corridors.js?v=a6334c0401";
+import { lifeSimSec, vehicleStyleFor } from "./lifevehicles.js?v=a6334c0401";
 import { createCamera, cameraProjection, panBy, zoomAboutPoint, resizeCamera,
          startFlyTo, stepFlyTo, visibleBbox, viewWidthKm, projectInto,
-         inflateBbox, fitBboxScale } from "./camera.js?v=963df69525";
-import { createPlacePanel } from "./panel.js?v=963df69525";
-import { SEASONS } from "./solar.js?v=963df69525";
-import { makeSunState, parseSunLink } from "./sunstate.js?v=963df69525";
+         inflateBbox, fitBboxScale } from "./camera.js?v=a6334c0401";
+import { createPlacePanel } from "./panel.js?v=a6334c0401";
+import { SEASONS } from "./solar.js?v=a6334c0401";
+import { makeSunState, parseSunLink } from "./sunstate.js?v=a6334c0401";
+import { modeColorFor, NIGHT_MODE_RGB, daylightBlendFor, groundLightness } from "./sunlight.js?v=a6334c0401";
 import { desertAvailable, desertLabel, drawDeserts, rankSubareas,
-         unpackDesertBits } from "./deserts.js?v=963df69525";
-import { findById, flattenTree } from "./places.js?v=963df69525";
-import { loadCities, resolveSlug } from "./cities.js?v=963df69525";
-import { exportFilename, capturePng, captureCommand, normalizeClock } from "./export.js?v=963df69525";
-import { CHROME_OVERLAY_IDS } from "./chrome.js?v=963df69525";
-import { pickView } from "./viewswitch.js?v=963df69525";
+         unpackDesertBits } from "./deserts.js?v=a6334c0401";
+import { findById, flattenTree } from "./places.js?v=a6334c0401";
+import { loadCities, resolveSlug } from "./cities.js?v=a6334c0401";
+import { exportFilename, capturePng, captureCommand, normalizeClock } from "./export.js?v=a6334c0401";
+import { CHROME_OVERLAY_IDS } from "./chrome.js?v=a6334c0401";
+import { pickView } from "./viewswitch.js?v=a6334c0401";
 import { MODE_NAMES, newVisibility, isVisible, setVisible, hiddenModeNames,
-         presentModes } from "./modefilter.js?v=963df69525";
+         presentModes } from "./modefilter.js?v=a6334c0401";
 
 // ---- AOI bboxes (lon/lat), mirrored from src/region.py EXACTLY -----------
 // Helsinki-specific subareas (fly-to chips + the guided intro's zoomed-in
@@ -61,14 +63,8 @@ const AOIS = {
 };
 const REGION_ONLY_CITY_CODE = 0xffff; // stop has no per-city street buffer
 
-// mode code -> normalized RGB, matching the exact HSL hex from the design.
-const MODE_COLORS = [
-  [1.0, 0.6, 0.2],       // 0 metro   #ff9933
-  [0.698, 0.4, 1.0],     // 1 train   #b266ff
-  [0.2, 0.8, 0.4],       // 2 tram    #33cc66
-  [0.561, 0.722, 0.902], // 3 bus     #8fb8e6
-  [0.561, 0.722, 0.902], // 4 ferry (shares the bus colour -- see the spec's mode-slot table)
-];
+// Mode slots are fixed; their colours adapt to the current solar elevation.
+const MODE_COLORS = NIGHT_MODE_RGB;
 
 // Phase B: the bundle root holds cities.json plus one directory per city
 // slug, so the per-city data dir is DERIVED from the active slug rather than
@@ -407,6 +403,8 @@ async function initApp() {
     if (loadingEl) loadingEl.hidden = loadingCount === 0;
   };
   const clockEl = document.getElementById("clock");
+  const clockDaypartEl = document.getElementById("clock-daypart");
+  const daypartMarkersEl = document.getElementById("daypart-markers");
   const whisperEl = document.getElementById("whisper");
   const scrubberEl = document.getElementById("scrubber");
   const playPauseEl = document.getElementById("play-pause");
@@ -422,6 +420,7 @@ async function initApp() {
   const stepNextEl = document.getElementById("step-next");
   const stepExploreEl = document.getElementById("step-explore");
   const modeRailEl = document.getElementById("mode-rail");
+  const controlRailEl = document.getElementById("control-rail");
   const modeRipplesEl = document.getElementById("mode-ripples");
   const modeLifeEl = document.getElementById("mode-life");
   const sunRailEl = document.getElementById("sun-rail");
@@ -633,6 +632,7 @@ async function initApp() {
   const dataMin = manifest.data_min;
   const dataMax = manifest.data_max;
   const dataSpan = Math.max(1, dataMax - dataMin);
+  const dayParts = gateDayParts(manifest.day_parts, dataMin, dataMax);
   // Note: manifest.tau_sec is the physics isochrone decay constant baked into
   // stamp_delay/stamp_intensity at bake time. Display fade is now driven
   // live by the band shader's life_tau (see RIPPLE_PARAMS below, sourced
@@ -1129,8 +1129,9 @@ async function initApp() {
     const geometry = buildCorridorGeometry(d.routes, d.vehicleShapeCoords, weights);
     field.setCorridors(geometry.vertices, geometry.batches);
   }
+  let frameModeColors = NIGHT_MODE_RGB.map((c) => c.slice());
   const corridorColors = Object.fromEntries(Object.entries(manifest.mode_codes || {})
-    .map(([mode, code]) => [mode, MODE_COLORS[code]]));
+    .map(([mode, code]) => [mode, frameModeColors[code]]));
 
   // The mode filter must gate the static corridor silhouette too, or hiding
   // bus removes its wavefronts/dots/flashes but leaves the bus NETWORK still
@@ -1160,7 +1161,8 @@ async function initApp() {
       return visibleCorridorColorsCache;
     }
     visibleCorridorColorsCache = {};
-    for (const [mode, color] of Object.entries(corridorColors)) {
+    for (const mode of Object.keys(corridorColors)) {
+      const color = frameModeColors[MODE_NAMES.indexOf(mode)] || frameModeColors[3];
       const code = MODE_NAMES.indexOf(mode);
       if (code < 0 || isVisible(vis, code)) visibleCorridorColorsCache[mode] = color;
     }
@@ -1265,8 +1267,8 @@ async function initApp() {
   }
   window.addEventListener("resize", () => fitProjection(), { signal: abort.signal });
 
-  // ---- --chrome-clear: #mode-filter's clearance over #chrome ---------------
-  // #mode-filter is pinned above #chrome with `bottom: calc(var(--chrome-clear)
+  // ---- --chrome-clear: #control-rail's clearance over #chrome --------------
+  // #control-rail is pinned above #chrome with `bottom: calc(var(--chrome-clear)
   // + 8px)`. #chrome's height is NOT a constant -- it measured 177.4px at
   // 1280x900 but 253.3px at 375x667, because its rows wrap -- so a hardcoded
   // offset is exactly the guess that buried the rail under the bar in the first
@@ -1613,6 +1615,37 @@ async function initApp() {
     scrubberEl.value = String(Math.min(1, Math.max(0, frac)));
   }
 
+  const DAYPART_ICONS = { sun: "☀", rise: "↗", midday: "●", fall: "↘", moon: "☾" };
+  function syncDaypartChrome() {
+    const rippleMode = state.mode === "ripples";
+    if (daypartMarkersEl) daypartMarkersEl.hidden = !rippleMode;
+    if (clockDaypartEl) clockDaypartEl.textContent = rippleMode ? activeDayPart(dayParts, state.t) : "";
+  }
+  function jumpRippleTo(t) {
+    state.t = Math.min(dataMax, Math.max(dataMin, t));
+    state.sePtr = lowerBound(eventTime, state.t);
+    field.resize(canvas.width, canvas.height);
+    clearActiveEvents();
+    updateScrubberFromT();
+    clockEl.textContent = formatClock(state.t);
+    syncDaypartChrome();
+  }
+  if (daypartMarkersEl) {
+    daypartMarkersEl.replaceChildren();
+    for (const part of dayParts) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "daypart-marker";
+      button.textContent = DAYPART_ICONS[part.icon] || "•";
+      button.style.setProperty("--pos", String(markerPosition(part.anchor_sec, dataMin, dataMax)));
+      button.title = part.title;
+      button.setAttribute("aria-label", part.title);
+      button.disabled = !part.enabled;
+      if (part.enabled) button.addEventListener("click", () => jumpRippleTo(part.anchor_sec), { signal: abort.signal });
+      daypartMarkersEl.append(button);
+    }
+  }
+  syncDaypartChrome();
   // scrubber -> t (hard jump: clear the field, resync sePtr)
   scrubberEl.addEventListener("input", () => {
     const frac = parseFloat(scrubberEl.value);
@@ -1632,10 +1665,7 @@ async function initApp() {
       clockEl.textContent = lifeClockText();
       return;
     }
-    state.t = dataMin + frac * dataSpan;
-    state.sePtr = lowerBound(eventTime, state.t);
-    field.resize(canvas.width, canvas.height); // clears both textures
-    clearActiveEvents(); // no stale in-flight wavefronts should survive a scrub
+    jumpRippleTo(dataMin + frac * dataSpan);
   }, { signal: abort.signal });
 
   // ---- speed / pause controls ---------------------------------------------
@@ -1715,6 +1745,7 @@ async function initApp() {
     if (next === "life") {
       state.mode = "life";
       syncModeButtons();
+      syncDaypartChrome();
       // showLoading is REFCOUNTED, so acquire and release must be BALANCED:
       // the spinner is only taken when this call will actually fetch, and the
       // `finally` guarantees it is handed back exactly once on every exit path
@@ -1769,6 +1800,7 @@ async function initApp() {
       field.resize(canvas.width, canvas.height);
       updateScrubberFromT();
       clockEl.textContent = lifeClockText();
+      syncDaypartChrome();
       // Life can be entered FROM Deserts, so the desert plate and its ranking
       // rows have to be taken down here too, not only on the way to Ripples.
       renderDesertPanel();
@@ -1776,6 +1808,7 @@ async function initApp() {
     } else if (next === "deserts") {
       state.mode = "deserts";
       syncModeButtons();
+      syncDaypartChrome();
       // Same refcounted-spinner contract as the Life branch above: take the
       // spinner only when this call will actually fetch, and hand it back
       // exactly once on EVERY exit path via `finally`.
@@ -1800,6 +1833,7 @@ async function initApp() {
       field.resize(canvas.width, canvas.height);
       field.present();
       clockEl.textContent = desertLabel(session.deserts?.horizon_sec ?? 300);
+      syncDaypartChrome();
       renderDesertPanel();
       // The desert layer lives on the #overlay canvas, which is only repainted
       // on camera change / selection / hover — nothing about entering a mode
@@ -1819,6 +1853,7 @@ async function initApp() {
       clearActiveEvents();
       updateScrubberFromT();
       clockEl.textContent = formatClock(state.t);
+      syncDaypartChrome();
     }
   }
 
@@ -1869,11 +1904,9 @@ async function initApp() {
   // Helsinki-only restriction above.
   if (sunRailEl) {
     sunRailEl.hidden = false;
+    controlRailEl.hidden = false;
   }
   syncModeButtons();
-  // #mode-history is deliberately given NO listener: it is `disabled`, so it
-  // cannot be clicked or keyboard-activated, and a handler that called nothing
-  // would just be dead code to trip over when the APC mode lands.
   modeRipplesEl?.addEventListener("click", () => { setMode("ripples"); }, { signal: abort.signal });
   modeLifeEl?.addEventListener("click", () => { setMode("life"); }, { signal: abort.signal });
   modeDesertsEl?.addEventListener("click", () => { setMode("deserts"); }, { signal: abort.signal });
@@ -1896,6 +1929,10 @@ async function initApp() {
     if (!modeFilterEl) return;
     const present = presentModes(stopMode);
     modeFilterEl.replaceChildren();
+    const label = document.createElement("div");
+    label.className = "rail-label";
+    label.textContent = "Transport";
+    modeFilterEl.append(label);
     if (present.length < 2) {
       // One mode (or none) means nothing to filter -- a lone toggle that can
       // only blank the screen is not a control, it is a trap.
@@ -1906,13 +1943,15 @@ async function initApp() {
       const name = MODE_NAMES[m];
       const btn = document.createElement("button");
       btn.type = "button";
+      btn.className = "rail-btn";
       btn.dataset.mode = name;
       btn.setAttribute("aria-pressed", String(isVisible(state.modeVisible, m)));
       btn.setAttribute("aria-label", `Toggle ${name}`);
       btn.title = `Show or hide ${name}`;
       const sw = document.createElement("span");
       sw.className = "swatch";
-      const [r, g, b] = MODE_COLORS[m];
+      sw.dataset.modeCode = String(m);
+      const [r, g, b] = frameModeColors[m];
       sw.style.setProperty("--swatch",
         `rgb(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)})`);
       btn.append(sw, document.createTextNode(name));
@@ -2001,6 +2040,7 @@ async function initApp() {
     for (const v of cityViews) {
       const btn = document.createElement("button");
       btn.type = "button";
+      btn.className = "rail-btn";
       btn.textContent = v.label;
       btn.dataset.viewSlug = v.slug;
       const on = v.slug === viewSlug;
@@ -2594,7 +2634,7 @@ async function initApp() {
     for (let m = 0; m < LIFE_MODE_SLOTS; m++) {
       const n = lifeCounts[m];
       if (n > 0) {
-        field.stamp(lifeSegs[m], lifeAlphas[m], lifeAges[m], MODE_COLORS[m], LIFE_PARAMS, n);
+        field.stamp(lifeSegs[m], lifeAlphas[m], lifeAges[m], frameModeColors[m], LIFE_PARAMS, n);
       }
     }
 
@@ -2640,7 +2680,7 @@ async function initApp() {
       const slot = (mode >= 0 && mode < MODE_N_V) ? mode : 3;
       if (!isVisible(state.modeVisible, slot)) continue;
       const [px, py] = state.proj.fn(x, y);
-      const c = MODE_COLORS[slot];
+      const c = frameModeColors[slot];
       const st = vehicleStyleFor(slot);
       pts[slot].push(px, py);
       cols[slot].push(c[0], c[1], c[2], st.alpha);
@@ -2863,7 +2903,7 @@ async function initApp() {
       // Pass the buffers whole plus an explicit vertex count -- no
       // Float32Array.from() copy, no subarray() allocation. field.stamp
       // uploads only the first n vertices via bufferSubData.
-      field.stamp(modeSegs[m], modeDelays[m], modeAges[m], MODE_COLORS[m], params, n, modeIntens[m]);
+      field.stamp(modeSegs[m], modeDelays[m], modeAges[m], frameModeColors[m], params, n, modeIntens[m]);
     }
   }
 
@@ -3004,6 +3044,24 @@ async function initApp() {
 
   // ---- rAF loop ------------------------------------------------------------
   function frame(ts) {
+    const paletteCivilSec = state.mode === "life"
+      ? lifeSimSec(state.lifePos, lifeNFrames(), session.lifeMeta)
+      : (state.t + manifest.sim_origin_sec) % 86400;
+    const paletteElev = state.sun && paletteCivilSec !== null
+      ? state.sun.elevationFor(((paletteCivilSec % 86400) + 86400) % 86400) : -90;
+    const groundL = state.sunEnabled ? groundLightness(paletteElev) : groundLightness(-90);
+    const groundLValue = groundL.toFixed(4);
+    if (document.documentElement.style.getPropertyValue("--ground-l") !== groundLValue) {
+      document.documentElement.style.setProperty("--ground-l", groundLValue);
+    }
+    frameModeColors = state.sunEnabled
+      ? MODE_COLORS.map((_, code) => modeColorFor(code, paletteElev))
+      : NIGHT_MODE_RGB.map((c) => c.slice());
+    visibleCorridorColorsSig = null;
+    for (const sw of modeFilterEl.querySelectorAll(".swatch")) {
+      const [r, g, b] = frameModeColors[Number(sw.dataset.modeCode)] || frameModeColors[3];
+      sw.style.setProperty("--swatch", `rgb(${Math.round(r*255)}, ${Math.round(g*255)}, ${Math.round(b*255)})`);
+    }
     // A frame scheduled before teardown() can still fire after it (cancel is
     // not retroactive for an already-dispatched callback). Bail if this
     // session is no longer the live one — otherwise we'd touch a disposed
@@ -3114,7 +3172,7 @@ async function initApp() {
       const lifeSunBase = state.sun && lifeCivilSec !== null
         ? state.sun.baseFor(((lifeCivilSec % 86400) + 86400) % 86400, state.sunEnabled)
         : undefined;
-      field.present(lifeSunBase);
+      field.present(lifeSunBase, state.sunEnabled ? daylightBlendFor(paletteElev) : 0);
 
       clockEl.textContent = lifeClockText();
       if (onClockChanged) onClockChanged();
@@ -3199,7 +3257,7 @@ async function initApp() {
           // full buffer shows up as "no progress", not as used > length.
           if (used === before) break;
         }
-        field.drawPulses(pulseScratch, used, state.proj, MODE_COLORS[mode],
+        field.drawPulses(pulseScratch, used, state.proj, frameModeColors[mode],
                          PULSE_TAIL, PULSE_BRIGHTNESS);
       }
     }
@@ -3265,7 +3323,7 @@ async function initApp() {
         const [px, py] = state.proj.fn(x, y);
         const mode = MODE_CODE(vehData.routes[trip.shape].mode);
         if (!isVisible(state.modeVisible, mode)) continue;
-        const c = MODE_COLORS[mode];
+        const c = frameModeColors[mode];
         pts.push(px, py); cols.push(c[0], c[1], c[2], oneXAlpha);
         pushed++;
       }
@@ -3299,7 +3357,7 @@ async function initApp() {
         const alpha = (1 - age / IMPACT_FADE_SIM_SEC) * 0.6;
         const mode = stopMode[stop];
         if (!isVisible(state.modeVisible, mode)) continue;
-        const c = MODE_COLORS[mode];
+        const c = frameModeColors[mode];
         pts.push(px, py); cols.push(c[0], c[1], c[2], alpha);
       }
       if (pts.length) field.stampDots(Float32Array.from(pts), Float32Array.from(cols), 7.0);
@@ -3309,9 +3367,11 @@ async function initApp() {
     // -- wrapped to [0, 86400) because a sim window running past midnight
     // would otherwise feed an out-of-range hour angle into solarElevation.
     const civilSec = (state.t + manifest.sim_origin_sec) % 86400;
-    field.present(state.sun ? state.sun.baseFor(civilSec, state.sunEnabled) : undefined);
+    field.present(state.sun ? state.sun.baseFor(civilSec, state.sunEnabled) : undefined,
+                  state.sunEnabled ? daylightBlendFor(paletteElev) : 0);
 
     clockEl.textContent = formatClock(state.t);
+    syncDaypartChrome();
     if (onClockChanged) onClockChanged();
     if (!state.paused) updateScrubberFromT();
     maybeUpdateStatus(ts);
