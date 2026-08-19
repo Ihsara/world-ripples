@@ -13,36 +13,36 @@
 // vehicle dots are interpolated in JS at playback (Option A) and impact dots
 // flash at a stop the instant its event fires.
 
-import { loadAll, makeCityCache } from "./data.js?v=1ec45ceae6";
-import { activeDayPart, gateDayParts, markerPosition } from "./dayparts.js?v=1ec45ceae6";
-import { loadLife } from "./life.js?v=1ec45ceae6";
-import { cellAlpha, precomputeDeaths, precomputeLastMode } from "./lifeview.js?v=1ec45ceae6";
+import { loadAll, makeCityCache } from "./data.js?v=81c2d071e8";
+import { activeDayPart, gateDayParts, markerPosition } from "./dayparts.js?v=81c2d071e8";
+import { loadLife } from "./life.js?v=81c2d071e8";
+import { cellAlpha, precomputeDeaths, precomputeLastMode } from "./lifeview.js?v=81c2d071e8";
 import { makeProjection, eventsInWindow, RippleField, realAge, clampSkip,
          rippleLifeHorizon, nextEventInView, whisperText,
-         normalizeStampIntensity } from "./field.js?v=1ec45ceae6";
-import { vehiclePosition } from "./vehicles.js?v=1ec45ceae6";
+         normalizeStampIntensity } from "./field.js?v=81c2d071e8";
+import { vehiclePosition } from "./vehicles.js?v=81c2d071e8";
 import { activeLegs, pulseGeometry, pulseHeadPoint, PULSE_BUDGET,
-         PULSE_TAIL } from "./edgepulse.js?v=1ec45ceae6";
+         PULSE_TAIL } from "./edgepulse.js?v=81c2d071e8";
 import { deriveCorridorWeights, buildCorridorGeometry, corridorWidth,
          corridorBrightness, edgeModeCounts, overlapColour, MODE_RANK,
-         COLOUR_MODES } from "./corridors.js?v=1ec45ceae6";
-import { lifeSimSec, vehicleStyleFor } from "./lifevehicles.js?v=1ec45ceae6";
+         COLOUR_MODES } from "./corridors.js?v=81c2d071e8";
+import { lifeSimSec, vehicleStyleFor } from "./lifevehicles.js?v=81c2d071e8";
 import { createCamera, cameraProjection, panBy, zoomAboutPoint, resizeCamera,
          startFlyTo, stepFlyTo, visibleBbox, viewWidthKm, projectInto,
-         inflateBbox, fitBboxScale } from "./camera.js?v=1ec45ceae6";
-import { createPlacePanel } from "./panel.js?v=1ec45ceae6";
-import { SEASONS } from "./solar.js?v=1ec45ceae6";
-import { makeSunState, parseSunLink } from "./sunstate.js?v=1ec45ceae6";
-import { modeColorFor, NIGHT_MODE_RGB, daylightBlendFor, groundLightness } from "./sunlight.js?v=1ec45ceae6";
+         inflateBbox, fitBboxScale } from "./camera.js?v=81c2d071e8";
+import { createPlacePanel } from "./panel.js?v=81c2d071e8";
+import { SEASONS } from "./solar.js?v=81c2d071e8";
+import { makeSunState, parseSunLink } from "./sunstate.js?v=81c2d071e8";
+import { modeColorFor, NIGHT_MODE_RGB, daylightBlendFor, groundLightness } from "./sunlight.js?v=81c2d071e8";
 import { desertAvailable, desertLabel, drawDeserts, rankSubareas,
-         unpackDesertBits } from "./deserts.js?v=1ec45ceae6";
-import { findById, flattenTree } from "./places.js?v=1ec45ceae6";
-import { loadCities, resolveSlug } from "./cities.js?v=1ec45ceae6";
-import { exportFilename, capturePng, captureCommand, normalizeClock } from "./export.js?v=1ec45ceae6";
-import { CHROME_OVERLAY_IDS } from "./chrome.js?v=1ec45ceae6";
-import { pickView } from "./viewswitch.js?v=1ec45ceae6";
+         unpackDesertBits } from "./deserts.js?v=81c2d071e8";
+import { findById, flattenTree } from "./places.js?v=81c2d071e8";
+import { loadCities, resolveSlug } from "./cities.js?v=81c2d071e8";
+import { exportFilename, capturePng, captureCommand, normalizeClock } from "./export.js?v=81c2d071e8";
+import { CHROME_OVERLAY_IDS } from "./chrome.js?v=81c2d071e8";
+import { pickView } from "./viewswitch.js?v=81c2d071e8";
 import { MODE_NAMES, newVisibility, isVisible, setVisible, hiddenModeNames,
-         presentModes } from "./modefilter.js?v=1ec45ceae6";
+         presentModes } from "./modefilter.js?v=81c2d071e8";
 
 // ---- AOI bboxes (lon/lat), mirrored from src/region.py EXACTLY -----------
 // Helsinki-specific subareas (fly-to chips + the guided intro's zoomed-in
