@@ -2,8 +2,8 @@
 // renderer. The field draws continuously; solar position changes far too
 // slowly to justify per-frame trigonometry, so it is recomputed at most once
 // per SIMULATED minute and the resulting colour is cached.
-import { solarElevation, SEASONS } from "./solar.js?v=a6334c0401";
-import { groundColorFor, DEFAULT_RGB } from "./sunlight.js?v=a6334c0401";
+import { solarElevation, SEASONS } from "./solar.js?v=1ec45ceae6";
+import { groundColorFor, DEFAULT_RGB } from "./sunlight.js?v=1ec45ceae6";
 
 export function makeSunState({ lat, lon, utcOffsetHours, seasonKey }) {
   const season = SEASONS.find((s) => s.key === seasonKey) || SEASONS[0];
