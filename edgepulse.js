@@ -14,7 +14,7 @@
 //
 // Everything here is pure (no WebGL, no DOM) so it can be unit-tested headlessly;
 // field.js owns the drawing and app.js owns the per-frame budget.
-import { pointAtDistance, shapePolyline } from "./vehicles.js?v=81c2d071e8";
+import { pointAtDistance, shapePolyline } from "./vehicles.js?v=8c0cbc03d0";
 
 // PULSE_BUDGET — max travelling heads considered in one frame.
 //

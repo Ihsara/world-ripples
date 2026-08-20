@@ -13,36 +13,37 @@
 // vehicle dots are interpolated in JS at playback (Option A) and impact dots
 // flash at a stop the instant its event fires.
 
-import { loadAll, makeCityCache } from "./data.js?v=81c2d071e8";
-import { activeDayPart, gateDayParts, markerPosition } from "./dayparts.js?v=81c2d071e8";
-import { loadLife } from "./life.js?v=81c2d071e8";
-import { cellAlpha, precomputeDeaths, precomputeLastMode } from "./lifeview.js?v=81c2d071e8";
+import { loadAll, makeCityCache } from "./data.js?v=8c0cbc03d0";
+import { activeDayPart, gateDayParts, markerPosition } from "./dayparts.js?v=8c0cbc03d0";
+import { loadLife } from "./life.js?v=8c0cbc03d0";
+import { cellAlpha, precomputeDeaths, precomputeLastMode } from "./lifeview.js?v=8c0cbc03d0";
 import { makeProjection, eventsInWindow, RippleField, realAge, clampSkip,
          rippleLifeHorizon, nextEventInView, whisperText,
-         normalizeStampIntensity } from "./field.js?v=81c2d071e8";
-import { vehiclePosition } from "./vehicles.js?v=81c2d071e8";
+         normalizeStampIntensity } from "./field.js?v=8c0cbc03d0";
+import { vehiclePosition } from "./vehicles.js?v=8c0cbc03d0";
 import { activeLegs, pulseGeometry, pulseHeadPoint, PULSE_BUDGET,
-         PULSE_TAIL } from "./edgepulse.js?v=81c2d071e8";
+         PULSE_TAIL } from "./edgepulse.js?v=8c0cbc03d0";
 import { deriveCorridorWeights, buildCorridorGeometry, corridorWidth,
          corridorBrightness, edgeModeCounts, overlapColour, MODE_RANK,
-         COLOUR_MODES } from "./corridors.js?v=81c2d071e8";
-import { lifeSimSec, vehicleStyleFor } from "./lifevehicles.js?v=81c2d071e8";
+         COLOUR_MODES } from "./corridors.js?v=8c0cbc03d0";
+import { lifeSimSec, vehicleStyleFor } from "./lifevehicles.js?v=8c0cbc03d0";
 import { createCamera, cameraProjection, panBy, zoomAboutPoint, resizeCamera,
          startFlyTo, stepFlyTo, visibleBbox, viewWidthKm, projectInto,
-         inflateBbox, fitBboxScale } from "./camera.js?v=81c2d071e8";
-import { createPlacePanel } from "./panel.js?v=81c2d071e8";
-import { SEASONS } from "./solar.js?v=81c2d071e8";
-import { makeSunState, parseSunLink } from "./sunstate.js?v=81c2d071e8";
-import { modeColorFor, NIGHT_MODE_RGB, daylightBlendFor, groundLightness } from "./sunlight.js?v=81c2d071e8";
+         inflateBbox, fitBboxScale } from "./camera.js?v=8c0cbc03d0";
+import { createPlacePanel } from "./panel.js?v=8c0cbc03d0";
+import { SEASONS } from "./solar.js?v=8c0cbc03d0";
+import { makeSunState, parseSunLink } from "./sunstate.js?v=8c0cbc03d0";
+import { modeColorFor, NIGHT_MODE_RGB, daylightBlendFor, groundLightness } from "./sunlight.js?v=8c0cbc03d0";
 import { desertAvailable, desertLabel, drawDeserts, rankSubareas,
-         unpackDesertBits } from "./deserts.js?v=81c2d071e8";
-import { findById, flattenTree } from "./places.js?v=81c2d071e8";
-import { loadCities, resolveSlug } from "./cities.js?v=81c2d071e8";
-import { exportFilename, capturePng, captureCommand, normalizeClock } from "./export.js?v=81c2d071e8";
-import { CHROME_OVERLAY_IDS } from "./chrome.js?v=81c2d071e8";
-import { pickView } from "./viewswitch.js?v=81c2d071e8";
+         unpackDesertBits } from "./deserts.js?v=8c0cbc03d0";
+import { findById, flattenTree } from "./places.js?v=8c0cbc03d0";
+import { loadCities, resolveSlug } from "./cities.js?v=8c0cbc03d0";
+import { exportFilename, capturePng, captureCommand, normalizeClock } from "./export.js?v=8c0cbc03d0";
+import { CHROME_OVERLAY_IDS } from "./chrome.js?v=8c0cbc03d0";
+import { createDwell, DWELL_SURFACES, isDevMode, resampleDwell, wakeZonePx } from "./dwell.js?v=8c0cbc03d0";
+import { pickView } from "./viewswitch.js?v=8c0cbc03d0";
 import { MODE_NAMES, newVisibility, isVisible, setVisible, hiddenModeNames,
-         presentModes } from "./modefilter.js?v=81c2d071e8";
+         presentModes } from "./modefilter.js?v=8c0cbc03d0";
 
 // ---- AOI bboxes (lon/lat), mirrored from src/region.py EXACTLY -----------
 // Helsinki-specific subareas (fly-to chips + the guided intro's zoomed-in
@@ -402,6 +403,21 @@ async function initApp() {
     loadingCount = nextLoadingCount(loadingCount, on);
     if (loadingEl) loadingEl.hidden = loadingCount === 0;
   };
+
+  // dismissIntro()/endStory() programmatically focus #play-pause so a
+  // keyboard user lands somewhere useful once the intro card or guided tour
+  // closes -- that focus() call is accessibility, not the user dwelling on
+  // #chrome. The dwell wiring's `focusin` handler (below) cannot tell those
+  // two apart on its own, since a synthetic and a real focus fire the exact
+  // same event; this flag is the one bit of context only the caller has.
+  // Set immediately before the call, consumed synchronously by the resulting
+  // focusin, so a REAL tab-into-the-bar or click-into-the-bar immediately
+  // afterward still holds normally -- only the one synthetic event is exempt.
+  let suppressNextChromeFocusHold = false;
+  function focusWithoutDwellHold(el) {
+    suppressNextChromeFocusHold = true;
+    el.focus();
+  }
   const clockEl = document.getElementById("clock");
   const clockDaypartEl = document.getElementById("clock-daypart");
   const daypartMarkersEl = document.getElementById("daypart-markers");
@@ -2222,7 +2238,7 @@ async function initApp() {
     introEl.hidden = true;
     chromeEl.hidden = false;
     try { localStorage.setItem(INTRO_SEEN_KEY, "1"); } catch (_) {}
-    playPauseEl.focus();
+    focusWithoutDwellHold(playPauseEl);
   }
   let introSeen = false;
   try { introSeen = localStorage.getItem(INTRO_SEEN_KEY) === "1"; } catch (_) {}
@@ -2297,6 +2313,102 @@ async function initApp() {
       console.warn("fullscreen refused", e));
   }, { signal: abort.signal });
 
+  // ---- dwell chrome ------------------------------------------------------
+  // Media-player behaviour: each surface rests small and expands when the
+  // pointer comes near it. The OLD wakeChrome only ran in fullscreen and
+  // blanked everything at once; dwell runs always and per-surface.
+  //
+  // We LAND AWAKE and sleep once after 5s: a cold visitor who lands on a
+  // 44px icon strip may never discover Life or Deserts.
+  const dwell = createDwell({ now: performance.now() });
+  const dwellEls = new Map(
+    DWELL_SURFACES.map((id) => [id, document.getElementById(id)]));
+
+  // Author tooling stays out of the visitor's chrome (spec: mechanism 3).
+  if (!isDevMode(location.search)) {
+    document.getElementById("export-row")?.remove();
+  }
+
+  // Last known pointer position, in viewport coords. Null until the first real
+  // pointer event -- headless and touch-only devices never set it.
+  let lastPointer = null;
+
+  function applyDwell() {
+    // Re-sample proximity from the LAST KNOWN pointer against each surface's
+    // CURRENT rect, every tick -- not just on pointermove. A surface changes
+    // size when it collapses, so a verdict computed against the wide
+    // land-awake rail stays latched after it shrinks, and a mouse resting
+    // still sends no further events to correct it. On a narrow viewport the
+    // screen centre sits inside the wide rail's zone but outside the collapsed
+    // one, which pinned the rail awake forever. See dwell.js resampleDwell.
+    resampleDwell(
+      dwell,
+      [...dwellEls].map(([id, el]) => [id, el ? el.getBoundingClientRect() : null]),
+      lastPointer,
+      wakeZonePx(window.innerWidth));
+    dwell.tick(performance.now());
+    for (const [id, el] of dwellEls) {
+      if (el) el.dataset.dwell = dwell.state(id);
+    }
+  }
+
+
+  // Land awake, then let the timers take over.
+  for (const id of DWELL_SURFACES) dwell.forceAwake(id);
+  applyDwell();
+  setTimeout(() => {
+    // release() is defined in dwell.js in this same task -- add it there
+    // FIRST. Optional chaining is deliberately NOT used: if release is
+    // missing, the chrome would silently never sleep and the whole feature
+    // would look "implemented" while doing nothing.
+    for (const id of DWELL_SURFACES) dwell.release(id);
+    applyDwell();
+  }, 5000);
+
+  document.addEventListener("pointermove", (e) => {
+    lastPointer = { x: e.clientX, y: e.clientY };
+    applyDwell();
+  }, { signal: abort.signal });
+
+  // Sleep must never fire mid-scrub or while focus is inside the surface --
+  // but a synthetic focusWithoutDwellHold() call (dismissIntro/endStory
+  // handing focus to #play-pause for accessibility) is not "the user is
+  // dwelling here" and must NOT pin the surface awake forever. The flag is
+  // consumed here, synchronously, on the one focusin it was set for; any
+  // subsequent real focusin (keyboard tab, click) is unaffected and holds
+  // exactly as before.
+  for (const [id, el] of dwellEls) {
+    if (!el) continue;
+    el.addEventListener("pointerdown", () => { dwell.setHold(id, true); applyDwell(); },
+      { signal: abort.signal });
+    el.addEventListener("focusin", () => {
+      if (suppressNextChromeFocusHold) {
+        suppressNextChromeFocusHold = false;
+      } else {
+        dwell.setHold(id, true);
+      }
+      applyDwell();
+    }, { signal: abort.signal });
+    el.addEventListener("focusout", () => { dwell.setHold(id, false); applyDwell(); },
+      { signal: abort.signal });
+  }
+  document.addEventListener("pointerup", () => {
+    for (const id of DWELL_SURFACES) dwell.setHold(id, false);
+    applyDwell();
+  }, { signal: abort.signal });
+
+  setInterval(applyDwell, 200);
+
+  // Capture hook: headless has no pointer, so a shot would otherwise inherit
+  // whatever the timer was doing. tools/capture.mjs calls forceAwake() and
+  // then ASSERTS the state (see Task 5).
+  window.__wrDwell = {
+    forceAwake() { for (const id of DWELL_SURFACES) dwell.forceAwake(id); applyDwell(); },
+    state(id) { return dwell.state(id); },
+  };
+
+  // Fullscreen still fully blanks the chrome; that is a different behaviour
+  // from dwell and keeps its own class.
   function wakeChrome() {
     document.body.classList.remove("chrome-hidden");
     clearTimeout(session.idleTimer);
@@ -2386,7 +2498,7 @@ async function initApp() {
     // whatever the scripted steps left sePtr pointing at.
     state.sePtr = lowerBound(eventTime, state.t);
     setPaused(tourResumePaused); // restore whatever play state ? was clicked in
-    playPauseEl.focus();
+    focusWithoutDwellHold(playPauseEl);
   }
 
   stepNextEl.addEventListener("click", () => {

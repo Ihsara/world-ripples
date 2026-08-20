@@ -450,3 +450,75 @@ body.chrome-hidden #control-rail { opacity: 0; pointer-events: none; transition:
   #dp-tab { margin-bottom: 190px; }
   #stepper { padding-bottom: 180px; }
 }
+
+/* ---------- dwell: media-player chrome ----------
+   Two states per surface, switched by data-dwell (set by app.js from
+   dwell.js). Deliberately an attribute on EACH surface, not a body class:
+   surfaces sleep independently, so approaching the rail must not wake the
+   bottom bar.
+
+   Dormant is SMALL, not GONE. What is currently selected stays readable;
+   only the unchosen options retract. (body.chrome-hidden, above, is the
+   different, older "blank it for fullscreen" behaviour.)
+
+   Dormant also sits at a LOWER ELEVATION -- thinner edge, less blur. Before
+   this, the 172px rail and a 22px daypart pip rendered at identical weight,
+   so nothing receded and everything competed. */
+#control-rail, #chrome {
+  transition: width .18s ease, max-height .18s ease, opacity .18s ease,
+              backdrop-filter .18s ease, border-color .18s ease;
+}
+
+#control-rail[data-dwell="dormant"] {
+  width: 44px;
+  border-color: color-mix(in oklab, var(--chrome-text) 12%, transparent);
+  backdrop-filter: blur(calc(var(--chrome-blur) * .5));
+}
+/* Retract everything except the ACTIVE choice in each group. */
+#control-rail[data-dwell="dormant"] .rail-label,
+#control-rail[data-dwell="dormant"] .rail-btn:not(.active):not([aria-pressed="true"]) {
+  display: none;
+}
+/* Transport collapses to swatches: the colour IS the information. */
+#control-rail[data-dwell="dormant"] #mode-filter .mr-label,
+#control-rail[data-dwell="dormant"] #mode-filter .rail-btn > span:not(.swatch) {
+  display: none;
+}
+
+#chrome[data-dwell="dormant"] {
+  left: 50%; right: auto; transform: translateX(-50%);
+  width: max-content; max-width: calc(100vw - 20px);
+  padding: 6px 14px;
+  border-color: color-mix(in oklab, var(--chrome-text) 12%, transparent);
+  backdrop-filter: blur(calc(var(--chrome-blur) * .5));
+  /* The base rule is `flex-direction: column`, which is exactly why dormant
+     used to still render as a 3-row card (daypart label row, clock row,
+     scrubber row) even with every OTHER child hidden -- hiding children
+     shrinks a column, it does not make one out of it. Row + center is what
+     actually produces "one line". */
+  flex-direction: row; align-items: center; gap: 10px;
+}
+/* One line: daypart + clock + scrubber. Everything else waits for awake,
+   including #utility (help/credits/fullscreen) -- on narrow viewports
+   #utility is a real row (see the max-width:430px block), not the desktop
+   display:contents no-op, so leaving it visible here was adding a whole
+   extra row to what was supposed to be the single-line state. */
+#chrome[data-dwell="dormant"] #transport,
+#chrome[data-dwell="dormant"] #whisper,
+#chrome[data-dwell="dormant"] #daypart-markers,
+#chrome[data-dwell="dormant"] #export-row,
+#chrome[data-dwell="dormant"] #utility { display: none; }
+#chrome[data-dwell="dormant"] #clock-daypart {
+  min-height: 0; white-space: nowrap;
+}
+#chrome[data-dwell="dormant"] #clock { white-space: nowrap; }
+#chrome[data-dwell="dormant"] #timeline {
+  /* padding-top:22px in the base rule reserves room for #daypart-markers,
+     which is hidden here -- keeping the padding would leave a blank gutter
+     above a scrubber that has nothing to clear. */
+  padding-top: 0; width: min(46vw, 460px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #control-rail, #chrome { transition: opacity .18s ease; }
+}
