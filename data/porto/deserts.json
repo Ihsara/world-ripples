@@ -1,1 +1,1 @@
-{"horizon_sec":300.0,"generated_from":"stamp_edge.bin + stop_city.bin","subareas":{"Porto":{"cells":143668,"reached":81437,"desert":62231,"fraction":0.43315839296155023,"stops":2585,"coverage_ok":true}}}
+{"horizon_sec":180.0,"generated_from":"stamp_edge.bin + stop_city.bin","subareas":{"Porto":{"cells":143668,"reached":65373,"desert":78295,"fraction":0.5449717404014812,"stops":2621,"coverage_ok":true}}}

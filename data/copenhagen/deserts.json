@@ -1,1 +1,1 @@
-{"horizon_sec":300.0,"generated_from":"stamp_edge.bin + stop_city.bin","subareas":{"Copenhagen":{"cells":323487,"reached":198148,"desert":125339,"fraction":0.3874622473236946,"stops":4161,"coverage_ok":true}}}
+{"horizon_sec":180.0,"generated_from":"stamp_edge.bin + stop_city.bin","subareas":{"Copenhagen":{"cells":324246,"reached":138212,"desert":186034,"fraction":0.5737433923625889,"stops":4233,"coverage_ok":true}}}

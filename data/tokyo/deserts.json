@@ -1,1 +1,1 @@
-{"horizon_sec":300.0,"generated_from":"stamp_edge.bin + stop_city.bin","subareas":{"Tokyo":{"cells":705332,"reached":70893,"desert":634439,"fraction":0.8994898856141506,"stops":149,"coverage_ok":false}}}
+{"horizon_sec":180.0,"generated_from":"stamp_edge.bin + stop_city.bin","subareas":{"Tokyo":{"cells":705311,"reached":30878,"desert":674433,"fraction":0.9562207309966809,"stops":149,"coverage_ok":false}}}
